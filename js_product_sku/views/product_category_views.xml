@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="product_category_form_view" model="ir.ui.view">
+        <field name="name">product.category.form.sku</field>
+        <field name="model">product.category</field>
+        <field name="inherit_id" ref="product.product_category_form_view"/>
+        <field name="arch" type="xml">
+            <field name="parent_id" position="after">
+                <field name="department_code" invisible="parent_id"/>
+                <field name="next_unique_number" invisible="not department_code"/>
+            </field>
+        </field>
+    </record>
+
+    <record id="product_category_list_view" model="ir.ui.view">
+        <field name="name">product.category.list.sku</field>
+        <field name="model">product.category</field>
+        <field name="inherit_id" ref="product.product_category_list_view"/>
+        <field name="arch" type="xml">
+            <field name="display_name" position="after">
+                <field name="department_code" optional="show"/>
+            </field>
+        </field>
+    </record>
+</odoo>

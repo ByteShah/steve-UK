@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo noupdate="1">
+    <record id="territory_uk" model="product.territory">
+        <field name="code">01</field>
+        <field name="name">United Kingdom</field>
+        <field name="is_default" eval="True"/>
+    </record>
+</odoo>

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="product_attribute_view_form" model="ir.ui.view">
+        <field name="name">product.attribute.form.sku</field>
+        <field name="model">product.attribute</field>
+        <field name="inherit_id" ref="product.product_attribute_view_form"/>
+        <field name="arch" type="xml">
+            <field name="create_variant" position="after">
+                <field name="sku_part"/>
+            </field>
+            <xpath expr="//field[@name='value_ids']/list/field[@name='name']" position="before">
+                <field name="sku_code" column_invisible="not parent.sku_part" required="sku_part"/>
+            </xpath>
+        </field>
+    </record>
+</odoo>

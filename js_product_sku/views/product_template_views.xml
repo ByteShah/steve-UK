@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="product_template_form_view" model="ir.ui.view">
+        <field name="name">product.template.form.sku</field>
+        <field name="model">product.template</field>
+        <field name="inherit_id" ref="product.product_template_form_view"/>
+        <field name="arch" type="xml">
+            <xpath expr="//group[@name='group_standard_price']/field[@name='categ_id']" position="after">
+                <field name="department_id" invisible="not department_id"/>
+                <field name="territory_id" options="{'no_create': True}" readonly="id and unique_number"/>
+                <field name="unique_number" invisible="not department_id" placeholder="Assigned on save"
+                    groups="js_product_sku.group_sku_manager"/>
+                <field name="unique_number" invisible="not department_id" placeholder="Assigned on save"
+                    readonly="1" groups="!js_product_sku.group_sku_manager"/>
+                <field name="sku_base" invisible="not sku_base"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="product_template_only_form_view" model="ir.ui.view">
+        <field name="name">product.template.product.form.sku</field>
+        <field name="model">product.template</field>
+        <field name="inherit_id" ref="product.product_template_only_form_view"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='attribute_line_ids']/list/field[@name='value_ids']" position="attributes">
+                <attribute name="context">{'default_attribute_id': attribute_id, 'show_attribute': False, 'show_sku_code': True}</attribute>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="product_template_tree_view" model="ir.ui.view">
+        <field name="name">product.template.list.sku</field>
+        <field name="model">product.template</field>
+        <field name="inherit_id" ref="product.product_template_tree_view"/>
+        <field name="arch" type="xml">
+            <field name="default_code" position="after">
+                <field name="sku_base" optional="show"/>
+                <field name="territory_id" optional="hide"/>
+            </field>
+        </field>
+    </record>
+
+    <record id="product_template_search_view" model="ir.ui.view">
+        <field name="name">product.template.search.sku</field>
+        <field name="model">product.template</field>
+        <field name="inherit_id" ref="product.product_template_search_view"/>
+        <field name="arch" type="xml">
+            <field name="categ_id" position="after">
+                <field name="sku_base"/>
+                <field name="territory_id"/>
+                <field name="department_id"/>
+            </field>
+            <xpath expr="//filter[@name='group_by_categ_id']" position="after">
+                <filter string="Territory" name="groupby_territory" context="{'group_by': 'territory_id'}"/>
+                <filter string="Department" name="groupby_department" context="{'group_by': 'department_id'}"/>
+            </xpath>
+        </field>
+    </record>
+</odoo>

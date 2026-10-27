@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="product_sku_setup_view_form" model="ir.ui.view">
+        <field name="name">product.sku.setup.form</field>
+        <field name="model">product.sku.setup</field>
+        <field name="arch" type="xml">
+            <form string="SKU Setup">
+                <p class="text-muted">
+                    Gives every product in a department its unique number, so each variant gets its SKU
+                    (TT D UUUU CCC SS). Codes found in the old product references are filled in: check them
+                    and fill in the empty ones. Products that already have an SKU are not changed.
+                </p>
+                <group>
+                    <group>
+                        <field name="territory_id" options="{'no_quick_create': True}"/>
+                        <field name="use_old_references"/>
+                        <field name="product_count"/>
+                    </group>
+                    <group>
+                        <field name="colour_attribute_id" options="{'no_create': True}"/>
+                        <field name="size_attribute_id" options="{'no_create': True}"/>
+                    </group>
+                </group>
+                <notebook>
+                    <page string="Departments" name="departments">
+                        <field name="department_line_ids">
+                            <list editable="bottom" create="0" delete="0">
+                                <field name="category_id" readonly="1" force_save="1"/>
+                                <field name="department_code"/>
+                            </list>
+                        </field>
+                    </page>
+                    <page string="Colour &amp; Size Codes" name="values">
+                        <field name="value_line_ids">
+                            <list editable="bottom" create="0" delete="0">
+                                <field name="attribute_id"/>
+                                <field name="value_id" readonly="1" force_save="1"/>
+                                <field name="sku_code" required="1"/>
+                            </list>
+                        </field>
+                    </page>
+                </notebook>
+                <footer>
+                    <button name="action_run" type="object" string="Assign SKUs" class="btn-primary"
+                        confirm="Save these codes and give the products their SKU? Department and colour/size codes cannot be changed once products use them."/>
+                    <button string="Cancel" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <record id="product_sku_setup_action" model="ir.actions.act_window">
+        <field name="name">SKU Setup</field>
+        <field name="res_model">product.sku.setup</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+
+    <menuitem id="product_sku_setup_menu" action="product_sku_setup_action"
+        parent="stock.menu_product_in_config_stock" sequence="4" groups="group_sku_manager"/>
+</odoo>

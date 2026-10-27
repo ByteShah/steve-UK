@@ -1,0 +1,6 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_product_territory_user,product.territory user,model_product_territory,base.group_user,1,0,0,0
+access_product_territory_manager,product.territory manager,model_product_territory,group_sku_manager,1,1,1,1
+access_product_sku_setup,product.sku.setup,model_product_sku_setup,group_sku_manager,1,1,1,1
+access_product_sku_setup_department,product.sku.setup.department,model_product_sku_setup_department,group_sku_manager,1,1,1,1
+access_product_sku_setup_value,product.sku.setup.value,model_product_sku_setup_value,group_sku_manager,1,1,1,1

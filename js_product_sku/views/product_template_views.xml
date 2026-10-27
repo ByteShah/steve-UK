@@ -8,11 +8,6 @@
             <xpath expr="//group[@name='group_standard_price']/field[@name='categ_id']" position="after">
                 <field name="department_id" invisible="not department_id"/>
                 <field name="territory_id" options="{'no_create': True}" readonly="id and unique_number"/>
-                <field name="unique_number" invisible="not department_id" placeholder="Assigned on save"
-                    groups="js_product_sku.group_sku_manager"/>
-                <field name="unique_number" invisible="not department_id" placeholder="Assigned on save"
-                    readonly="1" groups="!js_product_sku.group_sku_manager"/>
-                <field name="sku_base" invisible="not sku_base"/>
             </xpath>
         </field>
     </record>
@@ -34,7 +29,6 @@
         <field name="inherit_id" ref="product.product_template_tree_view"/>
         <field name="arch" type="xml">
             <field name="default_code" position="after">
-                <field name="sku_base" optional="show"/>
                 <field name="territory_id" optional="hide"/>
             </field>
         </field>
@@ -46,7 +40,6 @@
         <field name="inherit_id" ref="product.product_template_search_view"/>
         <field name="arch" type="xml">
             <field name="categ_id" position="after">
-                <field name="sku_base"/>
                 <field name="territory_id"/>
                 <field name="department_id"/>
             </field>

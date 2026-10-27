@@ -6,7 +6,7 @@ class ProductProduct(models.Model):
     _inherit = "product.product"
 
     # SKU = TT D UUUU CCC SS. Products without an SKU base keep what was typed in.
-    default_code = fields.Char(compute="_compute_sku_code", store=True, readonly=False)
+    default_code = fields.Char(compute="_compute_sku_code", store=True, readonly=False, tracking=True)
 
     @api.depends(
         "product_tmpl_id.sku_base",
@@ -15,13 +15,32 @@ class ProductProduct(models.Model):
     )
     def _compute_sku_code(self):
         for product in self.filtered("product_tmpl_id.sku_base"):
-            codes = {
-                ptav.attribute_id.sku_part: ptav.product_attribute_value_id.sku_code
-                for ptav in product.product_template_attribute_value_ids
-                if ptav.attribute_id.sku_part
-            }
-            product.default_code = (
-                f"{product.product_tmpl_id.sku_base}{codes.get('colour') or '000'}{codes.get('size') or '00'}")
+            product.default_code = product._get_generated_sku()
+
+    def _get_generated_sku(self):
+        self.ensure_one()
+        if not self.product_tmpl_id.sku_base:
+            return False
+        codes = {
+            ptav.attribute_id.sku_part: ptav.product_attribute_value_id.sku_code
+            for ptav in self.product_template_attribute_value_ids
+            if ptav.attribute_id.sku_part
+        }
+        return f"{self.product_tmpl_id.sku_base}{codes.get('colour') or '000'}{codes.get('size') or '00'}"
+
+    def _get_sku_change_warning(self, new_code):
+        sku = self._get_generated_sku()
+        if sku and new_code != sku:
+            return {"warning": {
+                "title": _("Internal Reference is the SKU"),
+                "message": _(
+                    "The Internal Reference is the generated SKU %s. Only change it if it is really needed: "
+                    "the change is logged on the product.", sku),
+            }}
+
+    @api.onchange("default_code")
+    def _onchange_default_code_sku(self):
+        return self._get_sku_change_warning(self.default_code)
 
     @api.constrains("default_code")
     def _check_sku_unique(self):

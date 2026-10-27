@@ -5,6 +5,7 @@ from odoo.exceptions import AccessError, ValidationError
 class ProductTemplate(models.Model):
     _inherit = "product.template"
 
+    default_code = fields.Char(tracking=True)
     territory_id = fields.Many2one(
         "product.territory", string="Territory", index=True, ondelete="restrict",
         default=lambda self: self.env["product.territory"].search([("is_default", "=", True)], limit=1),
@@ -33,6 +34,11 @@ class ProductTemplate(models.Model):
         for template in self:
             parts = (template.territory_id.code, template.department_id.department_code, template.unique_number)
             template.sku_base = "".join(parts) if all(parts) else False
+
+    @api.onchange("default_code")
+    def _onchange_default_code_sku(self):
+        if self._origin.product_variant_count == 1:
+            return self._origin.product_variant_id._get_sku_change_warning(self.default_code)
 
     @api.onchange("unique_number")
     def _onchange_unique_number(self):

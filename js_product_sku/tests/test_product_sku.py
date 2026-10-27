@@ -222,3 +222,17 @@ class TestProductSku(TransactionCase):
         wizard.department_line_ids.filtered(lambda l: l.category_id == misc).department_code = "6"
         with self.assertRaises(UserError):
             wizard.action_run()
+
+    def test_internal_reference_change_warned_and_tracked(self):
+        product = self._create_product()
+        variant = product.product_variant_id
+        sku = variant.default_code
+        self.assertFalse(variant._get_sku_change_warning(sku))
+        self.assertTrue(variant._get_sku_change_warning("CUSTOM-01"))
+        self.assertTrue(product.new({"default_code": "CUSTOM-01"}, origin=product)._onchange_default_code_sku())
+        self.env.cr.precommit.run()  # records created in the same transaction are not tracked
+        product.default_code = "CUSTOM-01"
+        self.env.cr.precommit.run()
+        self.assertEqual(variant.default_code, "CUSTOM-01")
+        tracking = product.message_ids.tracking_value_ids.filtered(lambda t: t.field_id.name == "default_code")
+        self.assertEqual((tracking.old_value_char, tracking.new_value_char), (sku, "CUSTOM-01"))

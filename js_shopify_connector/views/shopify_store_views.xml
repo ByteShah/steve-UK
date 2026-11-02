@@ -1,0 +1,250 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Store -->
+    <record id="shopify_store_view_form" model="ir.ui.view">
+        <field name="name">shopify.store.form</field>
+        <field name="model">shopify.store</field>
+        <field name="arch" type="xml">
+            <form string="Shopify Store">
+                <header>
+                    <button name="action_test_connection" type="object" string="Test Connection" class="btn-primary"/>
+                    <button name="action_fetch_locations" type="object" string="Load Locations"
+                            invisible="state != 'connected'"/>
+                    <button name="action_fetch_publications" type="object" string="Load Sales Channels"
+                            invisible="state != 'connected'"/>
+                    <field name="state" widget="statusbar"/>
+                </header>
+                <sheet>
+                    <div class="oe_button_box" name="button_box">
+                        <button name="action_view_logs" type="object" class="oe_stat_button" icon="fa-list-alt">
+                            <field name="log_count" widget="statinfo" string="Sync Log"/>
+                        </button>
+                    </div>
+                    <widget name="web_ribbon" title="Archived" bg_color="text-bg-danger" invisible="active"/>
+                    <div class="alert alert-danger" role="alert" invisible="state != 'error'">
+                        <field name="last_error"/>
+                    </div>
+                    <div class="oe_title">
+                        <label for="name"/>
+                        <h1><field name="name" placeholder="e.g. Saxby &amp; Nash"/></h1>
+                    </div>
+                    <group>
+                        <group string="Store">
+                            <field name="active" invisible="1"/>
+                            <field name="shop_domain" placeholder="e.g. saxby-nash.myshopify.com"/>
+                            <field name="api_version"/>
+                            <field name="shop_name" invisible="not shop_name"/>
+                            <field name="shop_currency" invisible="not shop_currency"/>
+                        </group>
+                        <group string="Credentials">
+                            <field name="auth_method" widget="radio"/>
+                            <field name="client_id" invisible="auth_method != 'client_credentials'"
+                                   required="auth_method == 'client_credentials'"/>
+                            <field name="client_secret" password="True"
+                                   invisible="auth_method != 'client_credentials'"
+                                   required="auth_method == 'client_credentials'"/>
+                            <field name="access_token" password="True" invisible="auth_method != 'access_token'"
+                                   required="auth_method == 'access_token'"/>
+                            <field name="access_token_expiry"
+                                   invisible="auth_method != 'client_credentials' or not access_token_expiry"/>
+                        </group>
+                        <group string="Products">
+                            <field name="company_id" groups="base.group_multi_company" options="{'no_create': True}"/>
+                            <field name="vendor"/>
+                        </group>
+                    </group>
+                    <div class="text-muted small" invisible="state == 'connected'">
+                        The Shopify app needs these Admin API access scopes:
+                        read_products, write_products, read_inventory, write_inventory, read_locations,
+                        read_publications, write_publications, read_files, write_files.
+                    </div>
+                    <notebook>
+                        <page string="Locations" name="locations">
+                            <field name="location_ids" readonly="1" context="{'active_test': False}">
+                                <list decoration-muted="not active">
+                                    <field name="name"/>
+                                    <field name="country_code"/>
+                                    <field name="warehouse_ids" widget="many2many_tags" string="Odoo Warehouses"/>
+                                    <field name="active" string="Active in Shopify"/>
+                                    <field name="shopify_id" optional="hide"/>
+                                </list>
+                            </field>
+                            <div class="text-muted small">Link a warehouse to a location on the warehouse form
+                                (Inventory › Configuration › Warehouses).</div>
+                        </page>
+                        <page string="Sales Channels" name="publications">
+                            <field name="publication_ids">
+                                <list editable="bottom" create="0" delete="0">
+                                    <field name="name"/>
+                                    <field name="publish_products" widget="boolean_toggle"/>
+                                    <field name="shopify_id" optional="hide"/>
+                                </list>
+                            </field>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="shopify_store_view_list" model="ir.ui.view">
+        <field name="name">shopify.store.list</field>
+        <field name="model">shopify.store</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="name"/>
+                <field name="shop_domain"/>
+                <field name="api_version"/>
+                <field name="state" widget="badge" decoration-success="state == 'connected'"
+                       decoration-danger="state == 'error'"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="shopify_store_action" model="ir.actions.act_window">
+        <field name="name">Shopify Store</field>
+        <field name="res_model">shopify.store</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">Connect your Shopify store</p>
+            <p>Enter the myshopify domain and the credentials of the Shopify app, then test the connection.</p>
+        </field>
+    </record>
+
+    <!-- Metafield mapping -->
+    <record id="shopify_metafield_map_view_list" model="ir.ui.view">
+        <field name="name">shopify.metafield.map.list</field>
+        <field name="model">shopify.metafield.map</field>
+        <field name="arch" type="xml">
+            <list editable="bottom">
+                <field name="sequence" widget="handle"/>
+                <field name="field_id" options="{'no_create': True}"/>
+                <field name="field_name" optional="show"/>
+                <field name="namespace"/>
+                <field name="key"/>
+                <field name="metafield_type"/>
+                <field name="dimension_unit" invisible="metafield_type != 'dimension'"/>
+                <field name="condition_field_id" options="{'no_create': True}" optional="show"/>
+                <field name="note"/>
+                <field name="active" column_invisible="1"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="shopify_metafield_map_action" model="ir.actions.act_window">
+        <field name="name">Shopify Metafields</field>
+        <field name="res_model">shopify.metafield.map</field>
+        <field name="view_mode">list</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">Map an Odoo product field to a Shopify metafield</p>
+            <p>Use the namespace and key of the metafield definition created in Shopify.</p>
+        </field>
+    </record>
+
+    <!-- Locations and channels -->
+    <record id="shopify_location_view_list" model="ir.ui.view">
+        <field name="name">shopify.location.list</field>
+        <field name="model">shopify.location</field>
+        <field name="arch" type="xml">
+            <list create="0" decoration-muted="not active">
+                <field name="name"/>
+                <field name="store_id"/>
+                <field name="country_code"/>
+                <field name="warehouse_ids" widget="many2many_tags" string="Odoo Warehouses"/>
+                <field name="active" string="Active in Shopify"/>
+                <field name="shopify_id" optional="hide"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="shopify_location_action" model="ir.actions.act_window">
+        <field name="name">Shopify Locations</field>
+        <field name="res_model">shopify.location</field>
+        <field name="view_mode">list</field>
+        <field name="context">{'active_test': False}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_empty_folder">No locations yet</p>
+            <p>Use Load Locations on the Shopify store.</p>
+        </field>
+    </record>
+
+    <!-- Sync log -->
+    <record id="shopify_sync_log_view_list" model="ir.ui.view">
+        <field name="name">shopify.sync.log.list</field>
+        <field name="model">shopify.sync.log</field>
+        <field name="arch" type="xml">
+            <list create="0" edit="0" decoration-danger="state == 'error'">
+                <field name="create_date" string="Date"/>
+                <field name="operation"/>
+                <field name="product_tmpl_id"/>
+                <field name="state" widget="badge" decoration-success="state == 'success'"
+                       decoration-danger="state == 'error'"/>
+                <field name="message"/>
+                <field name="duration" optional="hide"/>
+                <field name="store_id" optional="hide"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="shopify_sync_log_view_form" model="ir.ui.view">
+        <field name="name">shopify.sync.log.form</field>
+        <field name="model">shopify.sync.log</field>
+        <field name="arch" type="xml">
+            <form create="0" edit="0">
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="operation"/>
+                            <field name="state"/>
+                            <field name="product_tmpl_id"/>
+                        </group>
+                        <group>
+                            <field name="create_date" string="Date"/>
+                            <field name="duration"/>
+                            <field name="store_id"/>
+                        </group>
+                    </group>
+                    <group string="Message" invisible="not message">
+                        <field name="message" nolabel="1" colspan="2"/>
+                    </group>
+                    <notebook>
+                        <page string="Request" name="request">
+                            <field name="request" class="font-monospace" nolabel="1"/>
+                        </page>
+                        <page string="Response" name="response">
+                            <field name="response" class="font-monospace" nolabel="1"/>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="shopify_sync_log_view_search" model="ir.ui.view">
+        <field name="name">shopify.sync.log.search</field>
+        <field name="model">shopify.sync.log</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="product_tmpl_id"/>
+                <field name="message"/>
+                <filter string="Errors" name="errors" domain="[('state', '=', 'error')]"/>
+                <separator/>
+                <filter string="Operation" name="groupby_operation" context="{'group_by': 'operation'}"/>
+            </search>
+        </field>
+    </record>
+
+    <record id="shopify_sync_log_action" model="ir.actions.act_window">
+        <field name="name">Shopify Sync Log</field>
+        <field name="res_model">shopify.sync.log</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <!-- Menus: Sales > Configuration > Shopify -->
+    <menuitem id="menu_shopify_root" name="Shopify" parent="sale.menu_sale_config" sequence="90"
+              groups="group_shopify_manager"/>
+    <menuitem id="menu_shopify_store" name="Store" parent="menu_shopify_root" action="shopify_store_action" sequence="10"/>
+    <menuitem id="menu_shopify_location" name="Locations" parent="menu_shopify_root" action="shopify_location_action" sequence="20"/>
+    <menuitem id="menu_shopify_metafield" name="Metafields" parent="menu_shopify_root" action="shopify_metafield_map_action" sequence="30"/>
+    <menuitem id="menu_shopify_log" name="Sync Log" parent="menu_shopify_root" action="shopify_sync_log_action" sequence="40"/>
+</odoo>

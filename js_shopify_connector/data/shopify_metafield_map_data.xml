@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Suggested keys. The Shopify partner creates the metafield definitions; change a key here if theirs differs. -->
+<odoo noupdate="1">
+    <record id="metafield_width" model="shopify.metafield.map">
+        <field name="sequence">10</field>
+        <field name="field_id" ref="field_product_template__width"/>
+        <field name="key">width</field>
+        <field name="metafield_type">dimension</field>
+        <field name="note">Product width, shown on the product page</field>
+    </record>
+    <record id="metafield_depth" model="shopify.metafield.map">
+        <field name="sequence">11</field>
+        <field name="field_id" ref="field_product_template__depth"/>
+        <field name="key">depth</field>
+        <field name="metafield_type">dimension</field>
+        <field name="note">Product depth, shown on the product page</field>
+    </record>
+    <record id="metafield_height" model="shopify.metafield.map">
+        <field name="sequence">12</field>
+        <field name="field_id" ref="field_product_template__height"/>
+        <field name="key">height</field>
+        <field name="metafield_type">dimension</field>
+        <field name="note">Product height, shown on the product page</field>
+    </record>
+    <record id="metafield_materials" model="shopify.metafield.map">
+        <field name="sequence">20</field>
+        <field name="field_id" ref="field_product_template__materials"/>
+        <field name="key">materials</field>
+        <field name="metafield_type">single_line_text_field</field>
+        <field name="note">Product page and filters</field>
+    </record>
+    <record id="metafield_care_instructions" model="shopify.metafield.map">
+        <field name="sequence">21</field>
+        <field name="field_id" ref="field_product_template__care_instructions"/>
+        <field name="key">care_instructions</field>
+        <field name="metafield_type">rich_text_field</field>
+        <field name="note">Care tab on the product page</field>
+    </record>
+    <record id="metafield_age_safety" model="shopify.metafield.map">
+        <field name="sequence">30</field>
+        <field name="field_id" ref="field_product_template__age_safety_text"/>
+        <field name="condition_field_id" ref="field_product_template__enable_age_safety"/>
+        <field name="key">age_safety</field>
+        <field name="metafield_type">multi_line_text_field</field>
+        <field name="note">Age range and safety warnings</field>
+    </record>
+    <record id="metafield_gpsr_manufacturer" model="shopify.metafield.map">
+        <field name="sequence">31</field>
+        <field name="field_id" ref="field_product_template__gpsr_manufacturer_id"/>
+        <field name="key">gpsr_manufacturer</field>
+        <field name="metafield_type">multi_line_text_field</field>
+        <field name="note">GPSR: manufacturer name, postal address and email</field>
+    </record>
+    <record id="metafield_gpsr_eu_responsible" model="shopify.metafield.map">
+        <field name="sequence">32</field>
+        <field name="field_id" ref="field_product_template__gpsr_eu_responsible_id"/>
+        <field name="key">gpsr_eu_responsible_person</field>
+        <field name="metafield_type">multi_line_text_field</field>
+        <field name="note">GPSR: EU responsible person name, postal address and email</field>
+    </record>
+    <record id="metafield_lead_time" model="shopify.metafield.map">
+        <field name="sequence">40</field>
+        <field name="field_id" ref="stock.field_product_template__sale_delay"/>
+        <field name="key">lead_time_days</field>
+        <field name="metafield_type">number_integer</field>
+        <field name="note">Days to dispatch</field>
+    </record>
+    <record id="metafield_trade_note" model="shopify.metafield.map">
+        <field name="sequence">41</field>
+        <field name="field_id" ref="field_product_template__product_trade_note"/>
+        <field name="key">trade_note</field>
+        <field name="metafield_type">multi_line_text_field</field>
+        <field name="note">Non-default trade note or promises message</field>
+    </record>
+    <record id="metafield_complementary" model="shopify.metafield.map">
+        <field name="sequence">50</field>
+        <field name="field_id" ref="sale.field_product_template__optional_product_ids"/>
+        <field name="namespace">shopify--discovery--product_recommendation</field>
+        <field name="key">complementary_products</field>
+        <field name="metafield_type">list.product_reference</field>
+        <field name="note">Search &amp; Discovery 'Goes with' products</field>
+    </record>
+    <record id="metafield_google_age_group" model="shopify.metafield.map">
+        <field name="sequence">60</field>
+        <field name="field_id" ref="field_product_template__google_age_group"/>
+        <field name="condition_field_id" ref="field_product_template__enable_google_shopping"/>
+        <field name="namespace">mm-google-shopping</field>
+        <field name="key">age_group</field>
+        <field name="metafield_type">single_line_text_field</field>
+        <field name="note">Google &amp; YouTube app</field>
+    </record>
+    <record id="metafield_google_gender" model="shopify.metafield.map">
+        <field name="sequence">61</field>
+        <field name="field_id" ref="field_product_template__google_gender"/>
+        <field name="condition_field_id" ref="field_product_template__enable_google_shopping"/>
+        <field name="namespace">mm-google-shopping</field>
+        <field name="key">gender</field>
+        <field name="metafield_type">single_line_text_field</field>
+        <field name="note">Google &amp; YouTube app</field>
+    </record>
+    <record id="metafield_google_condition" model="shopify.metafield.map">
+        <field name="sequence">62</field>
+        <field name="field_id" ref="field_product_template__google_condition"/>
+        <field name="condition_field_id" ref="field_product_template__enable_google_shopping"/>
+        <field name="namespace">mm-google-shopping</field>
+        <field name="key">condition</field>
+        <field name="metafield_type">single_line_text_field</field>
+        <field name="note">Google &amp; YouTube app</field>
+    </record>
+    <record id="metafield_google_mpn" model="shopify.metafield.map">
+        <field name="sequence">63</field>
+        <field name="field_id" ref="js_product_sku.field_product_template__sku_base"/>
+        <field name="condition_field_id" ref="field_product_template__enable_google_shopping"/>
+        <field name="namespace">mm-google-shopping</field>
+        <field name="key">mpn</field>
+        <field name="metafield_type">single_line_text_field</field>
+        <field name="note">Google &amp; YouTube app: MPN = SKU base</field>
+    </record>
+</odoo>

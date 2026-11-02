@@ -1,0 +1,10 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_shopify_store_manager,shopify.store manager,model_shopify_store,group_shopify_manager,1,1,1,1
+access_shopify_location_user,shopify.location user,model_shopify_location,base.group_user,1,0,0,0
+access_shopify_location_manager,shopify.location manager,model_shopify_location,group_shopify_manager,1,1,1,1
+access_shopify_publication_user,shopify.publication user,model_shopify_publication,base.group_user,1,0,0,0
+access_shopify_publication_manager,shopify.publication manager,model_shopify_publication,group_shopify_manager,1,1,1,1
+access_shopify_metafield_map_user,shopify.metafield.map user,model_shopify_metafield_map,base.group_user,1,0,0,0
+access_shopify_metafield_map_manager,shopify.metafield.map manager,model_shopify_metafield_map,group_shopify_manager,1,1,1,1
+access_shopify_sync_log_manager,shopify.sync.log manager,model_shopify_sync_log,group_shopify_manager,1,1,1,1
+access_shopify_media_manager,shopify.media manager,model_shopify_media,group_shopify_manager,1,1,1,1

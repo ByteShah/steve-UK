@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="product_public_category_form_view" model="ir.ui.view">
+        <field name="name">product.public.category.form.shopify</field>
+        <field name="model">product.public.category</field>
+        <field name="inherit_id" ref="website_sale.product_public_category_form_view"/>
+        <field name="arch" type="xml">
+            <field name="parent_id" position="after">
+                <field name="shopify_taxonomy_id" placeholder="e.g. ap-2-3-2"/>
+            </field>
+        </field>
+    </record>
+</odoo>

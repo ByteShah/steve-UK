@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="action_shopify_check" model="ir.actions.server">
+        <field name="name">Check for Shopify</field>
+        <field name="model_id" ref="product.model_product_template"/>
+        <field name="binding_model_id" ref="product.model_product_template"/>
+        <field name="binding_view_types">list,kanban</field>
+        <field name="state">code</field>
+        <field name="code">action = records.action_shopify_check()</field>
+    </record>
+
+    <record id="action_shopify_publish" model="ir.actions.server">
+        <field name="name">Publish to Shopify</field>
+        <field name="model_id" ref="product.model_product_template"/>
+        <field name="binding_model_id" ref="product.model_product_template"/>
+        <field name="binding_view_types">list,kanban</field>
+        <field name="state">code</field>
+        <field name="code">action = records.action_shopify_publish()</field>
+    </record>
+</odoo>

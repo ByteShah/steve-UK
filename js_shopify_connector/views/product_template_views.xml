@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="product_template_only_form_view" model="ir.ui.view">
+        <field name="name">product.template.form.shopify</field>
+        <field name="model">product.template</field>
+        <field name="inherit_id" ref="product.product_template_only_form_view"/>
+        <field name="arch" type="xml">
+            <xpath expr="//notebook" position="inside">
+                <page string="Shopify" name="shopify">
+                    <div class="alert alert-danger" role="alert" invisible="shopify_sync_state != 'error'">
+                        <field name="shopify_sync_error"/>
+                    </div>
+                    <group>
+                        <group string="Publishing" name="shopify_publishing">
+                            <field name="shopify_enabled" widget="boolean_toggle"/>
+                            <field name="shopify_status" widget="radio" options="{'horizontal': true}"
+                                   invisible="not shopify_enabled"/>
+                            <field name="seo_name" string="Handle" placeholder="e.g. cane-dog-bed"
+                                   readonly="shopify_product_id" invisible="not shopify_enabled"
+                                   help="Shopify product URL: /products/&lt;handle&gt;. Filled from the product name; locked once published."/>
+                            <div colspan="2" class="d-flex flex-wrap gap-2" invisible="not shopify_enabled">
+                                <button name="action_shopify_publish" type="object" string="Publish to Shopify"
+                                        class="btn-primary" icon="fa-upload" invisible="shopify_product_id"/>
+                                <button name="action_shopify_publish" type="object" string="Update in Shopify"
+                                        class="btn-primary" icon="fa-refresh" invisible="not shopify_product_id"/>
+                                <button name="action_shopify_check" type="object" string="Check for Shopify"
+                                        class="btn-secondary" icon="fa-check-square-o"/>
+                                <button name="action_shopify_open" type="object" string="Open in Shopify"
+                                        class="btn-link" icon="fa-external-link" invisible="not shopify_product_id"/>
+                            </div>
+                        </group>
+                        <group string="Sync" name="shopify_sync" invisible="not shopify_enabled">
+                            <field name="shopify_sync_state" widget="badge"
+                                   decoration-success="shopify_sync_state == 'synced'"
+                                   decoration-warning="shopify_sync_state == 'to_sync'"
+                                   decoration-danger="shopify_sync_state == 'error'"/>
+                            <field name="shopify_last_synced"/>
+                            <field name="shopify_product_id"/>
+                        </group>
+                    </group>
+                    <group invisible="not shopify_enabled">
+                        <group string="SEO" name="shopify_seo">
+                            <field name="website_meta_title" string="SEO Title"
+                                   placeholder="Falls back to the product name (~60 characters)"/>
+                            <field name="website_meta_description" string="Meta Description"
+                                   placeholder="Search result snippet (~155 characters)"/>
+                        </group>
+                        <group string="Dimensions &amp; Materials" name="shopify_dimensions">
+                            <field name="width"/>
+                            <field name="depth"/>
+                            <field name="height"/>
+                            <field name="materials"/>
+                        </group>
+                        <group string="Safety &amp; Compliance" name="shopify_compliance">
+                            <field name="enable_age_safety"/>
+                            <field name="age_safety_text" invisible="not enable_age_safety"
+                                   placeholder="e.g. From birth to approx. 4 years"/>
+                            <field name="gpsr_manufacturer_id"/>
+                            <field name="gpsr_eu_responsible_id"/>
+                        </group>
+                        <group string="Google Shopping" name="shopify_google">
+                            <field name="enable_google_shopping"/>
+                            <field name="google_age_group" invisible="not enable_google_shopping"/>
+                            <field name="google_gender" invisible="not enable_google_shopping"/>
+                            <field name="google_condition" invisible="not enable_google_shopping"/>
+                        </group>
+                        <group string="Care Instructions" name="shopify_care" colspan="2">
+                            <field name="care_instructions" nolabel="1" colspan="2"
+                                   placeholder="e.g. Cover machine washable at 30°. Wipe frame with a dry cloth."/>
+                        </group>
+                        <group string="Trade Note" name="shopify_trade" colspan="2">
+                            <field name="product_trade_note" nolabel="1" colspan="2"
+                                   placeholder="Only if this product needs a non-default trade note"/>
+                        </group>
+                    </group>
+                    <group string="Variants" name="shopify_variants" invisible="not shopify_enabled">
+                        <field name="product_variant_ids" nolabel="1" colspan="2" readonly="1">
+                            <list>
+                                <field name="product_template_attribute_value_ids" widget="many2many_tags"
+                                       string="Options"/>
+                                <field name="default_code" string="SKU"/>
+                                <field name="barcode"/>
+                                <field name="lst_price" string="Price"/>
+                                <field name="standard_price" string="Cost" optional="show"/>
+                                <field name="weight" optional="show"/>
+                                <field name="qty_available" string="On Hand" optional="show"/>
+                                <field name="shopify_variant_id" optional="hide"/>
+                                <field name="shopify_inventory_item_id" optional="hide"/>
+                            </list>
+                        </field>
+                    </group>
+                </page>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="product_template_tree_view" model="ir.ui.view">
+        <field name="name">product.template.list.shopify</field>
+        <field name="model">product.template</field>
+        <field name="inherit_id" ref="product.product_template_tree_view"/>
+        <field name="arch" type="xml">
+            <xpath expr="//list" position="inside">
+                <field name="shopify_status" optional="hide"/>
+                <field name="shopify_sync_state" optional="hide" widget="badge"
+                       decoration-success="shopify_sync_state == 'synced'"
+                       decoration-warning="shopify_sync_state == 'to_sync'"
+                       decoration-danger="shopify_sync_state == 'error'"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="product_template_search_view" model="ir.ui.view">
+        <field name="name">product.template.search.shopify</field>
+        <field name="model">product.template</field>
+        <field name="inherit_id" ref="product.product_template_search_view"/>
+        <field name="arch" type="xml">
+            <xpath expr="//filter[@name='filter_to_sell']" position="before">
+                <filter string="Sell on Shopify" name="shopify_enabled" domain="[('shopify_enabled', '=', True)]"/>
+                <filter string="Not in Shopify" name="shopify_not_published"
+                        domain="[('shopify_enabled', '=', True), ('shopify_product_id', '=', False)]"/>
+                <filter string="Shopify Sync Error" name="shopify_sync_error"
+                        domain="[('shopify_sync_state', '=', 'error')]"/>
+                <separator/>
+            </xpath>
+            <xpath expr="//filter[@name='group_by_categ_id']" position="after">
+                <filter string="Shopify Status" name="groupby_shopify_status"
+                        context="{'group_by': 'shopify_status'}"/>
+            </xpath>
+        </field>
+    </record>
+</odoo>

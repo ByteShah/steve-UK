@@ -15,12 +15,12 @@ class TestShopifyProduct(TransactionCase):
         cls.Template = cls.env["product.template"]
         cls.uk = cls.env.ref("js_product_sku.territory_uk")
         cls.public_categ = cls.env["product.public.category"].create(
-            {"name": "Dog Beds", "shopify_taxonomy_id": "ap-2-3-2"})
-        cls.tag = cls.env["product.tag"].create({"name": "pets"})
+            {"name": "Dog Beds", "shopify_taxonomy_id": "ap-2-9"})
+        cls.tag = cls.env["product.tag"].create({"name": "qa-pets"})
 
     def _ready_product(self, **vals):
         template = self.Template.create({
-            "name": "Cane Dog Bed",
+            "name": "Test Cane Bed",
             "type": "consu",
             "is_storable": True,
             "territory_id": self.uk.id,
@@ -40,20 +40,20 @@ class TestShopifyProduct(TransactionCase):
         return template
 
     def test_handle_from_name(self):
-        template = self.Template.create({"name": "Cane Dog Bed"})
-        self.assertEqual(template.seo_name, "cane-dog-bed")
-        template.name = "Cane Dog Bed Large"
-        self.assertEqual(template.seo_name, "cane-dog-bed-large", "A default handle follows the name.")
+        template = self.Template.create({"name": "Test Cane Bed"})
+        self.assertEqual(template.seo_name, "test-cane-bed")
+        template.name = "Test Cane Bed Large"
+        self.assertEqual(template.seo_name, "test-cane-bed-large", "A default handle follows the name.")
 
     def test_custom_handle_kept(self):
-        template = self.Template.create({"name": "Cane Dog Bed", "seo_name": "My Dog Bed!"})
+        template = self.Template.create({"name": "Test Cane Bed", "seo_name": "My Dog Bed!"})
         self.assertEqual(template.seo_name, "my-dog-bed", "The handle is cleaned into a slug.")
         template.name = "Other Name"
         self.assertEqual(template.seo_name, "my-dog-bed", "A handle typed by hand does not follow the name.")
 
     def test_copy_gets_own_handle(self):
-        template = self.Template.create({"name": "Cane Dog Bed"})
-        self.assertEqual(template.copy().seo_name, "cane-dog-bed-copy")
+        template = self.Template.create({"name": "Test Cane Bed"})
+        self.assertEqual(template.copy().seo_name, "test-cane-bed-copy")
 
     def test_handle_locked_once_published(self):
         template = self._ready_product()
@@ -61,7 +61,7 @@ class TestShopifyProduct(TransactionCase):
         with self.assertRaises(ValidationError):
             template.seo_name = "new-handle"
         template.name = "Renamed"
-        self.assertEqual(template.seo_name, "cane-dog-bed", "A published handle does not follow the name.")
+        self.assertEqual(template.seo_name, "test-cane-bed", "A published handle does not follow the name.")
 
     def test_handle_unique_on_shopify(self):
         self._ready_product()

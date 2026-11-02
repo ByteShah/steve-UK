@@ -36,14 +36,14 @@ class ShopifyPublishCase(TransactionCase):
         cls.vat = env["account.tax"].create({
             "name": "VAT 20% (test)", "amount": 20, "amount_type": "percent", "type_tax_use": "sale",
             "price_include_override": "tax_excluded"})
-        cls.colour = env["product.attribute"].create({"name": "Colour", "create_variant": "always", "value_ids": [
+        cls.colour = env["product.attribute"].create({"name": "QA Colour", "create_variant": "always", "value_ids": [
             (0, 0, {"name": "Natural", "sequence": 1}), (0, 0, {"name": "Black", "sequence": 2})]})
         partner = env["res.partner"].create({
             "name": "Saxby & Nash Ltd", "street": "1 High Street", "city": "London", "zip": "N1 1AA",
             "country_id": env.ref("base.uk").id, "email": "safety@example.com"})
 
         cls.template = env["product.template"].create({
-            "name": "Cane Dog Bed",
+            "name": "Test Cane Bed",
             "type": "consu",
             "is_storable": True,
             "territory_id": env.ref("js_product_sku.territory_uk").id,
@@ -52,8 +52,8 @@ class ShopifyPublishCase(TransactionCase):
             "taxes_id": [(6, 0, cls.vat.ids)],
             "categ_id": env["product.category"].create({"name": "Dog Beds"}).id,
             "description_ecommerce": "<p>Hand-woven cane on a solid oak frame.</p>",
-            "product_tag_ids": [(0, 0, {"name": "pets"}), (0, 0, {"name": "new-in"})],
-            "public_categ_ids": [(0, 0, {"name": "Dog Beds", "shopify_taxonomy_id": "ap-2-3-2"})],
+            "product_tag_ids": [(0, 0, {"name": "qa-pets"}), (0, 0, {"name": "qa-new-in"})],
+            "public_categ_ids": [(0, 0, {"name": "Dog Beds", "shopify_taxonomy_id": "ap-2-9"})],
             "image_1920": PNG_1PX,
             "hs_code": "9403.89",
             "country_of_origin": env.ref("base.cn").id,
@@ -88,7 +88,7 @@ class ShopifyPublishCase(TransactionCase):
         return call[1]["json"]
 
     def product_set_response(self):
-        return gql({"productSet": {"product": {"id": PRODUCT_GID, "handle": "cane-dog-bed", "variants": {"nodes": [
+        return gql({"productSet": {"product": {"id": PRODUCT_GID, "handle": "test-cane-bed", "variants": {"nodes": [
             {"id": "gid://shopify/ProductVariant/1", "sku": "SN-CDB-NAT", "inventoryItem": {"id": "gid://shopify/InventoryItem/1"}},
             {"id": "gid://shopify/ProductVariant/2", "sku": "SN-CDB-BLK", "inventoryItem": {"id": "gid://shopify/InventoryItem/2"}},
         ]}}, "userErrors": []}})
@@ -113,22 +113,22 @@ class TestShopifyPublish(ShopifyPublishCase):
         self.assertEqual(calls[1][1]["data"], {"key": "abc"})
 
         variables = self.body(calls[3])["variables"]
-        self.assertEqual(variables["identifier"], {"handle": "cane-dog-bed"}, "A first publish matches on handle.")
+        self.assertEqual(variables["identifier"], {"handle": "test-cane-bed"}, "A first publish matches on handle.")
         product = variables["input"]
-        self.assertEqual(product["title"], "Cane Dog Bed")
+        self.assertEqual(product["title"], "Test Cane Bed")
         self.assertEqual(product["vendor"], "Saxby & Nash")
         self.assertEqual(product["productType"], "Dog Beds")
-        self.assertEqual(product["category"], "gid://shopify/TaxonomyCategory/ap-2-3-2")
+        self.assertEqual(product["category"], "gid://shopify/TaxonomyCategory/ap-2-9")
         self.assertEqual(product["status"], "DRAFT")
-        self.assertEqual(sorted(product["tags"]), ["new-in", "pets"])
-        self.assertEqual(product["seo"]["title"], "Cane Dog Bed")
-        self.assertEqual(product["files"], [{"id": "gid://shopify/MediaImage/9", "alt": "Cane Dog Bed",
+        self.assertEqual(sorted(product["tags"]), ["qa-new-in", "qa-pets"])
+        self.assertEqual(product["seo"]["title"], "Test Cane Bed")
+        self.assertEqual(product["files"], [{"id": "gid://shopify/MediaImage/9", "alt": "Test Cane Bed",
                                              "contentType": "IMAGE"}])
-        self.assertEqual(product["productOptions"], [{"name": "Colour", "position": 1,
+        self.assertEqual(product["productOptions"], [{"name": "QA Colour", "position": 1,
                                                       "values": [{"name": "Natural"}, {"name": "Black"}]}])
 
         natural = next(v for v in product["variants"] if v["sku"] == "SN-CDB-NAT")
-        self.assertEqual(natural["optionValues"], [{"optionName": "Colour", "name": "Natural"}])
+        self.assertEqual(natural["optionValues"], [{"optionName": "QA Colour", "name": "Natural"}])
         self.assertEqual(natural["price"], "195.0", "Shopify gets the UK price including VAT.")
         self.assertTrue(natural["taxable"])
         self.assertEqual(natural["inventoryPolicy"], "DENY")
@@ -198,7 +198,7 @@ class TestShopifyPublish(ShopifyPublishCase):
             self.template.action_shopify_publish()
 
     def test_single_variant_product(self):
-        template = self.env["product.template"].create({"name": "Linen Pet Blanket", "default_code": "SN-LPB"})
+        template = self.env["product.template"].create({"name": "Test Pet Blanket", "default_code": "SN-LPB"})
         payload = ProductPayloadBuilder(template, self.store).build()
         self.assertEqual(payload["productOptions"], [{"name": "Title", "position": 1,
                                                       "values": [{"name": "Default Title"}]}])

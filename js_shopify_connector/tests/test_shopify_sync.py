@@ -36,13 +36,13 @@ class TestShopifySync(ShopifyPublishCase):
     # ------------------------------------------------------------------
     def test_changes_mark_to_sync(self):
         changes = [
-            lambda: self.template.write({"name": "Cane Dog Bed XL"}),
+            lambda: self.template.write({"name": "Test Cane Bed XL"}),
             lambda: self.template.write({"materials": "Oak"}),            # metafield field
             lambda: self.natural.write({"barcode": "5060000000999"}),     # variant field
             lambda: self.env["product.image"].create({"name": "Side", "product_tmpl_id": self.template.id}),
             lambda: self.template.categ_id.write({"name": "Beds"}),         # product type
             lambda: self.template.product_tag_ids[:1].write({"name": "pet"}),
-            lambda: self.template.public_categ_ids.write({"shopify_taxonomy_id": "ap-2-3-3"}),
+            lambda: self.template.public_categ_ids.write({"shopify_taxonomy_id": "ap-2-14"}),
             lambda: self.template.write({"active": False}),
         ]
         for change in changes:
@@ -67,10 +67,10 @@ class TestShopifySync(ShopifyPublishCase):
     # Product cron
     # ------------------------------------------------------------------
     def test_cron_updates_changed_products(self):
-        self.template.name = "Cane Dog Bed XL"
+        self.template.name = "Test Cane Bed XL"
         (done, failed), calls = self.run_shopify(self.store._sync_changed_products, *self.update_responses())
         self.assertEqual((done, failed), (1, 0))
-        self.assertEqual(self.body(calls[0])["variables"]["input"]["title"], "Cane Dog Bed XL")
+        self.assertEqual(self.body(calls[0])["variables"]["input"]["title"], "Test Cane Bed XL")
         self.assertEqual(self.template.shopify_sync_state, "synced")
 
     def test_archive_in_odoo_archives_in_shopify(self):
@@ -89,7 +89,7 @@ class TestShopifySync(ShopifyPublishCase):
         self.assertIn("productUpdate", self.body(calls[0])["query"])
 
     def test_unexpected_error_does_not_stop_others(self):
-        self.template.name = "Cane Dog Bed XL"
+        self.template.name = "Test Cane Bed XL"
         with patch.object(self.ProductTemplate, "_shopify_publish", side_effect=ValueError("boom")), \
                 mute_logger("odoo.addons.js_shopify_connector.models.shopify_store"):
             done, failed = self.store._sync_changed_products()

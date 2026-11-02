@@ -6,7 +6,7 @@
         <field name="inherit_id" ref="website_sale.product_public_category_form_view"/>
         <field name="arch" type="xml">
             <field name="parent_id" position="after">
-                <field name="shopify_taxonomy_id" placeholder="e.g. ap-2-3-2"/>
+                <field name="shopify_taxonomy_id" placeholder="e.g. ap-2-9 (Pet Beds)"/>
             </field>
         </field>
     </record>

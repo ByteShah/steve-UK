@@ -118,6 +118,8 @@
                 <filter string="Sell on Shopify" name="shopify_enabled" domain="[('shopify_enabled', '=', True)]"/>
                 <filter string="Not in Shopify" name="shopify_not_published"
                         domain="[('shopify_enabled', '=', True), ('shopify_product_id', '=', False)]"/>
+                <filter string="Shopify To Sync" name="shopify_to_sync"
+                        domain="[('shopify_sync_state', '=', 'to_sync')]"/>
                 <filter string="Shopify Sync Error" name="shopify_sync_error"
                         domain="[('shopify_sync_state', '=', 'error')]"/>
                 <separator/>

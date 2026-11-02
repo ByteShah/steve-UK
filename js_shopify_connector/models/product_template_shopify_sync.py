@@ -2,7 +2,7 @@ import base64
 import hashlib
 import mimetypes
 
-from odoo import _, fields, models
+from odoo import _, api, fields, models
 from odoo.exceptions import UserError
 from odoo.tools.mimetypes import guess_mimetype
 
@@ -59,6 +59,26 @@ mutation ($input: InventorySetQuantitiesInput!) {
 }
 """
 
+INVENTORY_BATCH = 250  # Shopify limit of quantities per inventorySetQuantities call
+
+INVENTORY_ACTIVATE_MUTATION = """
+mutation ($inventoryItemId: ID!, $locationId: ID!) {
+  inventoryActivate(inventoryItemId: $inventoryItemId, locationId: $locationId) {
+    inventoryLevel { id }
+    userErrors { field message }
+  }
+}
+"""
+
+ARCHIVE_MUTATION = """
+mutation ($product: ProductUpdateInput!) {
+  productUpdate(product: $product) {
+    product { id status }
+    userErrors { field message }
+  }
+}
+"""
+
 PUBLISH_MUTATION = """
 mutation ($id: ID!, $input: [PublicationInput!]!) {
   publishablePublish(id: $id, input: $input) {
@@ -80,14 +100,15 @@ class ProductTemplate(models.Model):
         store = self.env["shopify.store"].sudo()._get_active_store()
         if not store:
             raise UserError(_("Set up the Shopify store first (Sales > Configuration > Shopify > Store)."))
-        if len(self) == 1:
+        if len(self) == 1 and self.active and self.shopify_enabled:
             issues = self._get_shopify_publish_issues()
             if issues:
                 raise UserError(_("Fix these before publishing to Shopify:\n\n%s",
                                   "\n".join("• " + issue for issue in issues)))
         done = failed = 0
         for template in self:
-            if template._shopify_publish(store):
+            ok = template._shopify_sync(store) if template.shopify_product_id else template._shopify_publish(store)
+            if ok:
                 done += 1
             else:
                 failed += 1
@@ -138,6 +159,23 @@ class ProductTemplate(models.Model):
 
     def _shopify_set_error(self, message):
         self.sudo().write({"shopify_sync_state": "error", "shopify_sync_error": message})
+
+    def _shopify_sync(self, store):
+        """Bring a published product up to date: full update, or archive in Shopify when the
+        product is archived in Odoo or Sell on Shopify was switched off."""
+        self.ensure_one()
+        if self.active and self.shopify_enabled:
+            return self._shopify_publish(store)
+        try:
+            store._call("sync_product", ARCHIVE_MUTATION,
+                        {"product": {"id": self.shopify_product_id, "status": "ARCHIVED"}},
+                        product=self, mutation="productUpdate")
+        except ShopifyError as error:
+            self._shopify_set_error(str(error))
+            return False
+        self.sudo().write({"shopify_sync_state": "synced", "shopify_sync_error": False,
+                           "shopify_last_synced": fields.Datetime.now()})
+        return True
 
     def _shopify_send(self, store):
         is_new = not self.shopify_product_id
@@ -267,9 +305,23 @@ class ProductProduct(models.Model):
         rows = [{"inventoryItemId": variant.shopify_inventory_item_id, "locationId": location_id,
                  "quantity": quantity}
                 for variant in variants for location_id, quantity in quantities.get(variant.id, {}).items()]
-        if not rows:
-            return
         product = variants.product_tmpl_id[:1] if len(variants.product_tmpl_id) == 1 else False
+        for start in range(0, len(rows), INVENTORY_BATCH):
+            chunk = rows[start:start + INVENTORY_BATCH]
+            try:
+                self._shopify_set_quantities(store, chunk, product)
+            except ShopifyError as error:
+                if "not stocked" not in str(error).lower():
+                    raise
+                # A location linked after the variant was created: stock the items there first.
+                for row in chunk:
+                    store._call("sync_stock", INVENTORY_ACTIVATE_MUTATION, {
+                        "inventoryItemId": row["inventoryItemId"], "locationId": row["locationId"]},
+                        product=product, mutation="inventoryActivate")
+                self._shopify_set_quantities(store, chunk, product)
+
+    @api.model
+    def _shopify_set_quantities(self, store, rows, product=False):
         # Newer API versions compare-and-set with changeFromQuantity (null = no check);
         # older ones use ignoreCompareQuantity.
         variables = {"input": {"name": "available", "reason": "correction",

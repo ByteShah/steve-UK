@@ -7,5 +7,6 @@ from . import shopify_media
 from . import product_public_category
 from . import product_template
 from . import product_template_shopify_sync
+from . import shopify_change_tracking
 from . import product_product
 from . import stock_warehouse

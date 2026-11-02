@@ -1,3 +1,4 @@
+import logging
 import re
 import time
 
@@ -5,6 +6,8 @@ from odoo import _, api, fields, models
 from odoo.exceptions import ValidationError
 
 from ..services.shopify_client import ShopifyClient, ShopifyError
+
+_logger = logging.getLogger(__name__)
 
 DEFAULT_API_VERSION = "2026-10"
 
@@ -79,6 +82,9 @@ class ShopifyStore(models.Model):
     location_ids = fields.One2many("shopify.location", "store_id", string="Locations")
     publication_ids = fields.One2many("shopify.publication", "store_id", string="Sales Channels")
     log_count = fields.Integer(compute="_compute_log_count")
+    stock_synced_until = fields.Datetime(
+        string="Stock Sent Until", readonly=True, copy=False,
+        help="Stock changes up to this time have been sent to Shopify.")
 
     _one_active_store = models.UniqueIndex(
         "(active) WHERE active", "Only one Shopify store can be active: products keep one set of Shopify IDs.")
@@ -233,6 +239,82 @@ class ShopifyStore(models.Model):
         for gone in existing.values():
             gone.active = False
         return self._notify(_("%s Shopify sales channel(s) loaded.", len(names)))
+
+    # ------------------------------------------------------------------
+    # Ongoing sync
+    # ------------------------------------------------------------------
+    @api.model
+    def _cron_sync_products(self):
+        store = self._get_active_store()
+        if store:
+            store._sync_changed_products(commit=True)
+
+    @api.model
+    def _cron_sync_stock(self):
+        store = self._get_active_store()
+        if store:
+            store._sync_stock(commit=True)
+
+    def _sync_changed_products(self, commit=False):
+        """Update every published product marked To Sync. Returns (done, failed)."""
+        self.ensure_one()
+        templates = self.env["product.template"].with_context(active_test=False).search(
+            [("shopify_product_id", "!=", False), ("shopify_sync_state", "=", "to_sync")], order="write_date")
+        done = failed = 0
+        for position, template in enumerate(templates, start=1):
+            try:
+                with self.env.cr.savepoint():
+                    ok = template._shopify_sync(self)
+            except Exception as error:  # noqa: BLE001 - one broken product must not stop the others
+                _logger.exception("Shopify sync of %s failed", template.display_name)
+                template._shopify_set_error(_("Unexpected error: %s", error))
+                self.env["shopify.sync.log"]._log(self, "sync_product", "error", str(error), product=template)
+                ok = False
+            done += ok
+            failed += not ok
+            if commit and self.env["ir.cron"]._commit_progress(1, remaining=len(templates) - position) <= 0:
+                break
+        return done, failed
+
+    def _sync_stock(self, commit=False, full=False):
+        """Send the stock of variants whose stock moved since the last run (all of them with `full`)."""
+        self.ensure_one()
+        started = fields.Datetime.now()
+        Variant = self.env["product.product"]
+        domain = [("shopify_inventory_item_id", "!=", False), ("is_storable", "=", True),
+                  ("product_tmpl_id.shopify_enabled", "=", True)]
+        since = self.stock_synced_until
+        if since and not full:
+            moved = {product.id for [product] in self.env["stock.move"]._read_group(
+                [("write_date", ">=", since)], ["product_id"])}
+            moved |= {product.id for [product] in self.env["stock.quant"]._read_group(
+                [("write_date", ">=", since)], ["product_id"])}
+            domain.append(("id", "in", list(moved)))
+        variants = Variant.search(domain)
+        try:
+            variants._shopify_push_stock(self)
+        except ShopifyError:
+            # Logged by _call; the same changes are sent again on the next run.
+            return False
+        self.stock_synced_until = started
+        if commit:
+            self.env["ir.cron"]._commit_progress(len(variants))
+        return len(variants)
+
+    def action_sync_products_now(self):
+        self.ensure_one()
+        done, failed = self._sync_changed_products()
+        if failed:
+            return self._notify(_("%(done)s product(s) updated in Shopify, %(failed)s failed.",
+                                  done=done, failed=failed), "warning")
+        return self._notify(_("%s product(s) updated in Shopify.", done))
+
+    def action_sync_stock_now(self):
+        self.ensure_one()
+        count = self._sync_stock(full=True)
+        if count is False:
+            return self._notify(_("Shopify refused the stock update. See the sync log."), "danger")
+        return self._notify(_("Stock of %s variant(s) sent to Shopify.", count))
 
     def action_view_logs(self):
         self.ensure_one()

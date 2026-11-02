@@ -13,8 +13,8 @@ from .test_shopify_product import PNG_1PX
 PRODUCT_GID = "gid://shopify/Product/100"
 
 
-@tagged("post_install", "-at_install")
-class TestShopifyPublish(TransactionCase):
+class ShopifyPublishCase(TransactionCase):
+    """A store with a location and a channel, and a 2-variant product ready to publish."""
 
     @classmethod
     def setUpClass(cls):
@@ -68,7 +68,7 @@ class TestShopifyPublish(TransactionCase):
         cls.natural = cls.template.product_variant_ids.filtered(lambda v: v.default_code == "SN-CDB-NAT")
         env["stock.quant"]._update_available_quantity(cls.natural, cls.warehouse.lot_stock_id, 24)
 
-    def run_publish(self, *responses):
+    def run_shopify(self, func, *responses):
         queue, calls = list(responses), []
 
         def fake_post(url, **kwargs):
@@ -76,9 +76,12 @@ class TestShopifyPublish(TransactionCase):
             return queue.pop(0)
 
         with patch.object(ShopifyClient, "_http_post", side_effect=fake_post), patch.object(ShopifyClient, "_sleep"):
-            action = self.template.action_shopify_publish()
+            result = func()
         self.assertFalse(queue, "Every expected Shopify call was made.")
-        return action, calls
+        return result, calls
+
+    def run_publish(self, *responses):
+        return self.run_shopify(self.template.action_shopify_publish, *responses)
 
     @staticmethod
     def body(call):
@@ -98,6 +101,10 @@ class TestShopifyPublish(TransactionCase):
                                     "userErrors": []}})
         published = gql({"publishablePublish": {"userErrors": []}})
         return self.run_publish(staged, FakeResponse(status=204), files, self.product_set_response(), published)
+
+
+@tagged("post_install", "-at_install")
+class TestShopifyPublish(ShopifyPublishCase):
 
     def test_first_publish(self):
         action, calls = self.first_publish()

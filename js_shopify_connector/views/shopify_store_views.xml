@@ -12,6 +12,10 @@
                             invisible="state != 'connected'"/>
                     <button name="action_fetch_publications" type="object" string="Load Sales Channels"
                             invisible="state != 'connected'"/>
+                    <button name="action_sync_products_now" type="object" string="Sync Changed Products"
+                            invisible="state != 'connected'"/>
+                    <button name="action_sync_stock_now" type="object" string="Send All Stock"
+                            invisible="state != 'connected'"/>
                     <field name="state" widget="statusbar"/>
                 </header>
                 <sheet>
@@ -51,6 +55,7 @@
                         <group string="Products">
                             <field name="company_id" groups="base.group_multi_company" options="{'no_create': True}"/>
                             <field name="vendor"/>
+                            <field name="stock_synced_until"/>
                         </group>
                     </group>
                     <div class="text-muted small" invisible="state == 'connected'">

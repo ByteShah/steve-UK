@@ -35,6 +35,7 @@ class TestShopifyConnection(TransactionCase):
     def setUpClass(cls):
         super().setUpClass()
         cls.env["shopify.store"].search([]).active = False
+        cls.env.flush_all()
         cls.store = cls.env["shopify.store"].create({
             "name": "Test Store",
             "shop_domain": "https://Test-Shop.myshopify.com/admin",
@@ -153,6 +154,7 @@ class TestShopifyConnection(TransactionCase):
         maps = self.env["shopify.metafield.map"].search([])
         keys = set(maps.mapped("display_name"))
         self.assertIn("custom.materials", keys)
-        self.assertIn("mm-google-shopping.mpn", keys)
+        self.assertIn("custom.google_mpn", keys)
+        self.assertIn("custom.gpsr_manufacturer_address", keys)
         with self.assertRaises(ValidationError):
             maps[0].key = "bad key!"

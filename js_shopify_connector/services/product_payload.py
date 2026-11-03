@@ -1,9 +1,12 @@
 """Odoo product.template -> Shopify productSet input."""
 import json
+import re
 
 from odoo.tools import float_round, html2plaintext, is_html_empty
 
 from .rich_text import html_to_rich_text
+
+INLINE_TAGS = re.compile(r"</?(b|strong|i|em|u|span)\b[^>]*>", re.I)
 
 DEFAULT_OPTION = "Title"
 DEFAULT_VALUE = "Default Title"
@@ -196,7 +199,7 @@ class ProductPayloadBuilder:
             if not raw:
                 return False
             if raw._name == "res.partner":
-                text = "\n".join(self.partner_lines(p) for p in raw)
+                text = "\n".join(self.partner_text(p, mapping.partner_part) for p in raw)
             else:
                 text = ", ".join(raw.mapped("display_name"))
         elif field.type == "html":
@@ -204,7 +207,8 @@ class ProductPayloadBuilder:
                 return False
             if kind == "rich_text_field":
                 return html_to_rich_text(raw)
-            text = html2plaintext(raw)
+            # html2plaintext marks bold/italic with "*" and "/"; Shopify text fields show those literally.
+            text = html2plaintext(INLINE_TAGS.sub("", str(raw)))
         else:
             text = raw
 
@@ -225,6 +229,17 @@ class ProductPayloadBuilder:
         if kind == "single_line_text_field":
             text = " ".join(text.split())
         return text or False
+
+    @classmethod
+    def partner_text(cls, partner, part="full"):
+        if part == "name":
+            return partner.name or ""
+        if part == "address":
+            address = partner._display_address(without_company=True)
+            return "\n".join(line.strip() for line in address.splitlines() if line.strip())
+        if part == "contact":
+            return partner.email or partner.phone or ""
+        return cls.partner_lines(partner)
 
     @staticmethod
     def partner_lines(partner):

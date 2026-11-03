@@ -214,6 +214,14 @@ class ShopifyStore(models.Model):
                 Location.create(dict(vals, store_id=self.id, shopify_id=node["id"]))
         for gone in existing.values():
             gone.active = False
+        linked = self._auto_link_warehouse()
+        if linked:
+            return self._notify(_("%(count)s Shopify location(s) loaded. Warehouse %(warehouse)s now sends its "
+                                  "stock to %(location)s.", count=len(nodes), warehouse=linked.name,
+                                  location=linked.shopify_location_id.name))
+        if not self._get_stock_warehouses():
+            return self._notify(_("%s Shopify location(s) loaded. Link a warehouse to a location (Inventory › "
+                                  "Configuration › Warehouses) so stock is sent to Shopify.", len(nodes)), "warning")
         return self._notify(_("%s Shopify location(s) loaded.", len(nodes)))
 
     def action_fetch_publications(self):
@@ -276,9 +284,36 @@ class ShopifyStore(models.Model):
                 break
         return done, failed
 
-    def _sync_stock(self, commit=False, full=False):
-        """Send the stock of variants whose stock moved since the last run (all of them with `full`)."""
+    def _get_stock_warehouses(self):
+        """Warehouses whose stock is sent to this store: those linked to one of its active locations."""
         self.ensure_one()
+        return self.env["stock.warehouse"].sudo().search([
+            ("shopify_location_id.store_id", "=", self.id), ("shopify_location_id.active", "=", True),
+            ("company_id", "=", self.company_id.id)])
+
+    def _shopify_resend_all_stock(self):
+        """A warehouse link changed: the next stock run sends every variant, not only the ones
+        whose stock moved, so stock that was already there reaches the new location."""
+        self.sudo().write({"stock_synced_until": False})
+
+    def _auto_link_warehouse(self):
+        """Link the company's only warehouse to the store's only active location, when neither
+        choice is ambiguous and nothing is linked yet."""
+        self.ensure_one()
+        locations = self.location_ids.filtered("active")
+        warehouses = self.env["stock.warehouse"].sudo().search([("company_id", "=", self.company_id.id)])
+        if len(locations) == 1 and len(warehouses) == 1 and not self._get_stock_warehouses():
+            warehouses.shopify_location_id = locations
+            return warehouses
+        return self.env["stock.warehouse"]
+
+    def _sync_stock(self, commit=False, full=False):
+        """Send the stock of variants whose stock moved since the last run (all of them with `full`).
+        Returns the number of variants sent, False when Shopify refused, None when no warehouse is linked."""
+        self.ensure_one()
+        if not self._get_stock_warehouses():
+            # Nothing to send to; keep the position so the stock goes once a warehouse is linked.
+            return None
         started = fields.Datetime.now()
         Variant = self.env["product.product"]
         domain = [("shopify_inventory_item_id", "!=", False), ("is_storable", "=", True),
@@ -312,6 +347,10 @@ class ShopifyStore(models.Model):
     def action_sync_stock_now(self):
         self.ensure_one()
         count = self._sync_stock(full=True)
+        if count is None:
+            return self._notify(_(
+                "No warehouse is linked to a Shopify location, so no stock was sent. Open Inventory › "
+                "Configuration › Warehouses and set Shopify Location on the warehouse."), "warning")
         if count is False:
             return self._notify(_("Shopify refused the stock update. See the sync log."), "danger")
         return self._notify(_("Stock of %s variant(s) sent to Shopify.", count))

@@ -107,6 +107,27 @@ class ProductTemplate(models.Model):
                 return res
         return super().write(vals)
 
+    # ------------------------------------------------------------------
+    # Weight on products with variants
+    # ------------------------------------------------------------------
+    def _compute_weight(self):
+        """Standard Odoo shows a weight only for single-variant products. Also show it when
+        all variants weigh the same; 0 means the variants have different weights."""
+        super()._compute_weight()
+        for template in self:
+            variants = template.product_variant_ids
+            if len(variants) > 1 and len(set(variants.mapped("weight"))) == 1:
+                template.weight = variants[0].weight
+
+    def _set_weight(self):
+        """A weight typed on a product with variants applies to all its variants.
+        0 is never spread: it is what the form shows when the variants differ."""
+        super()._set_weight()
+        for template in self:
+            variants = template.product_variant_ids
+            if len(variants) > 1 and template.weight:
+                variants.filtered(lambda v: v.weight != template.weight).weight = template.weight
+
     @api.constrains("shopify_enabled", "territory_id")
     def _check_shopify_territory(self):
         uk = self.env.ref("js_product_sku.territory_uk", raise_if_not_found=False)

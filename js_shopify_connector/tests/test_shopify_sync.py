@@ -9,7 +9,14 @@ from odoo.tools import mute_logger
 from .test_shopify_connection import gql
 from .test_shopify_publish import PRODUCT_GID, ShopifyPublishCase
 
-OK_STOCK = {"inventorySetQuantities": {"inventoryAdjustmentGroup": {"id": "x"}, "userErrors": []}}
+def stock_ok(*items, location="gid://shopify/Location/1"):
+    """inventorySetQuantities reply listing the items Shopify changed (all test items by default)."""
+    items = items or ("gid://shopify/InventoryItem/1", "gid://shopify/InventoryItem/2")
+    return {"inventorySetQuantities": {"inventoryAdjustmentGroup": {"id": "x", "changes": [
+        {"item": {"id": item}, "location": {"id": location}} for item in items]}, "userErrors": []}}
+
+
+OK_STOCK = stock_ok()
 
 
 @tagged("post_install", "-at_install")
@@ -27,7 +34,6 @@ class TestShopifySync(ShopifyPublishCase):
 
     def update_responses(self):
         return (self.product_set_response(),
-                gql({"metafieldsDelete": {"deletedMetafields": [], "userErrors": []}}),
                 gql(OK_STOCK),
                 gql({"publishablePublish": {"userErrors": []}}))
 
@@ -105,6 +111,9 @@ class TestShopifySync(ShopifyPublishCase):
         self.env["stock.quant"]._update_available_quantity(self.natural, self.warehouse.lot_stock_id, 6)
         count, calls = self.run_shopify(self.store._sync_stock, gql(OK_STOCK))
         self.assertEqual(count, 1, "Only the variant whose stock moved is sent.")
+        self.assertIn("@idempotent(key: $idempotencyKey)", self.body(calls[0])["query"],
+                      "Shopify refuses inventory mutations without an idempotency key.")
+        self.assertTrue(self.body(calls[0])["variables"]["idempotencyKey"])
         quantities = self.body(calls[0])["variables"]["input"]["quantities"]
         self.assertEqual([(q["inventoryItemId"], q["quantity"]) for q in quantities],
                          [("gid://shopify/InventoryItem/1", 30)])
@@ -119,6 +128,70 @@ class TestShopifySync(ShopifyPublishCase):
         self.assertFalse(result)
         self.assertEqual(self.store.stock_synced_until, since, "The same changes are sent again next run.")
 
+    def test_no_linked_warehouse_sends_nothing(self):
+        since = fields.Datetime.now() - timedelta(minutes=5)
+        self.store.stock_synced_until = since
+        self.warehouse.shopify_location_id = False
+        self.store.stock_synced_until = since
+        result, calls = self.run_shopify(self.store._sync_stock)
+        self.assertIsNone(result)
+        self.assertFalse(calls)
+        self.assertEqual(self.store.stock_synced_until, since, "Stock is kept for when a warehouse is linked.")
+        action, _calls = self.run_shopify(self.store.action_sync_stock_now)
+        self.assertEqual(action["params"]["type"], "warning")
+
+    def test_linking_warehouse_sends_existing_stock(self):
+        """Stock that was already there before the link has no recent move: it must still be sent."""
+        self.warehouse.shopify_location_id = False
+        self.store.stock_synced_until = fields.Datetime.now()
+        self.warehouse.shopify_location_id = self.location
+        self.assertFalse(self.store.stock_synced_until, "A new link makes the next run send all stock.")
+        count, calls = self.run_shopify(self.store._sync_stock, gql(OK_STOCK))
+        self.assertEqual(count, 2, "Both variants are sent although neither moved.")
+        quantities = self.body(calls[0])["variables"]["input"]["quantities"]
+        self.assertIn(("gid://shopify/InventoryItem/1", 24),
+                      [(q["inventoryItemId"], q["quantity"]) for q in quantities])
+
+    def test_auto_link_only_when_unambiguous(self):
+        self.warehouse.shopify_location_id = False
+        warehouses = self.env["stock.warehouse"].search([("company_id", "=", self.store.company_id.id)])
+        linked = self.store._auto_link_warehouse()
+        if len(warehouses) == 1:
+            self.assertEqual(linked, self.warehouse)
+            self.assertEqual(self.warehouse.shopify_location_id, self.location)
+        else:
+            self.assertFalse(linked, "Several warehouses: the user picks.")
+        self.warehouse.shopify_location_id = False
+        self.env["shopify.location"].create({
+            "store_id": self.store.id, "shopify_id": "gid://shopify/Location/2", "name": "3PL"})
+        self.assertFalse(self.store._auto_link_warehouse(), "Several locations: the user picks.")
+        self.assertFalse(self.warehouse.shopify_location_id)
+
+    def test_unstocked_items_are_stocked_and_resent(self):
+        """Shopify skips items not stocked at the location without an error: Odoo stocks them there."""
+        self.store.stock_synced_until = False
+        skipped = gql(stock_ok("gid://shopify/InventoryItem/2"))  # item 1 silently skipped
+        levels = gql({"nodes": [{"id": "gid://shopify/InventoryItem/1", "inventoryLevel": None}]})
+        activated = gql({"inventoryActivate": {"inventoryLevel": {"id": "l"}, "userErrors": []}})
+        resent = gql(stock_ok("gid://shopify/InventoryItem/1"))
+        count, calls = self.run_shopify(self.store._sync_stock, skipped, levels, activated, resent)
+        self.assertEqual(count, 2)
+        self.assertEqual(self.body(calls[1])["variables"]["ids"], ["gid://shopify/InventoryItem/1"],
+                         "Only the row Shopify did not change is checked.")
+        self.assertEqual(self.body(calls[2])["variables"]["inventoryItemId"], "gid://shopify/InventoryItem/1")
+        self.assertEqual([(q["inventoryItemId"], q["quantity"])
+                          for q in self.body(calls[3])["variables"]["input"]["quantities"]],
+                         [("gid://shopify/InventoryItem/1", 24)])
+
+    def test_unchanged_stocked_items_are_left_alone(self):
+        self.store.stock_synced_until = False
+        nothing_changed = gql({"inventorySetQuantities": {"inventoryAdjustmentGroup": None, "userErrors": []}})
+        levels = gql({"nodes": [{"id": "gid://shopify/InventoryItem/1", "inventoryLevel": {"id": "a"}},
+                                {"id": "gid://shopify/InventoryItem/2", "inventoryLevel": {"id": "b"}}]})
+        count, calls = self.run_shopify(self.store._sync_stock, nothing_changed, levels)
+        self.assertEqual(count, 2)
+        self.assertEqual(len(calls), 2, "Same quantity and already stocked: nothing more is sent.")
+
     def test_new_location_gets_activated(self):
         not_stocked = gql({"inventorySetQuantities": {"userErrors": [
             {"field": ["input"], "message": "The specified inventory item is not stocked at the location."}]}})
@@ -127,3 +200,4 @@ class TestShopifySync(ShopifyPublishCase):
         count, calls = self.run_shopify(lambda: self.store._sync_stock(full=True), *responses)
         self.assertEqual(count, 2)
         self.assertIn("inventoryActivate", self.body(calls[1])["query"])
+        self.assertTrue(self.body(calls[1])["variables"]["idempotencyKey"])

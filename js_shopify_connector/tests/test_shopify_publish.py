@@ -21,6 +21,15 @@ class ShopifyPublishCase(TransactionCase):
         super().setUpClass()
         env = cls.env
         env["shopify.store"].search([]).active = False
+        # Products already published from this database belong to the real store: keep the sync
+        # jobs under test away from them (rolled back with the test).
+        env["product.product"].with_context(active_test=False).search(
+            [("shopify_inventory_item_id", "!=", False)]).write(
+            {"shopify_variant_id": False, "shopify_inventory_item_id": False})
+        env["product.template"].with_context(active_test=False).search(
+            [("shopify_product_id", "!=", False)]).write(
+            {"shopify_product_id": False, "shopify_sync_state": "not_published"})
+        env.flush_all()  # the archive must reach the database before the new store's INSERT
         cls.store = env["shopify.store"].create({
             "name": "Test Store", "shop_domain": "test-shop.myshopify.com",
             "auth_method": "access_token", "access_token": "shpat_fixed", "vendor": "Saxby & Nash",
@@ -91,7 +100,7 @@ class ShopifyPublishCase(TransactionCase):
         return gql({"productSet": {"product": {"id": PRODUCT_GID, "handle": "test-cane-bed", "variants": {"nodes": [
             {"id": "gid://shopify/ProductVariant/1", "sku": "SN-CDB-NAT", "inventoryItem": {"id": "gid://shopify/InventoryItem/1"}},
             {"id": "gid://shopify/ProductVariant/2", "sku": "SN-CDB-BLK", "inventoryItem": {"id": "gid://shopify/InventoryItem/2"}},
-        ]}}, "userErrors": []}})
+        ]}, "metafields": {"nodes": [{"namespace": "custom", "key": "materials"}]}}, "userErrors": []}})
 
     def first_publish(self):
         staged = gql({"stagedUploadsCreate": {"stagedTargets": [
@@ -141,11 +150,12 @@ class TestShopifyPublish(ShopifyPublishCase):
 
         metafields = {(m["namespace"], m["key"]): m for m in product["metafields"]}
         self.assertEqual(metafields[("custom", "materials")]["value"], "Rattan cane, solid oak")
-        self.assertEqual(json.loads(metafields[("custom", "width")]["value"]), {"value": 90.0, "unit": "cm"})
-        self.assertIn("1 High Street", metafields[("custom", "gpsr_manufacturer")]["value"])
-        self.assertIn("safety@example.com", metafields[("custom", "gpsr_manufacturer")]["value"])
-        self.assertEqual(json.loads(metafields[("custom", "care_instructions")]["value"])["type"], "root")
-        self.assertNotIn(("mm-google-shopping", "age_group"), metafields, "Google fields need Google Shopping on.")
+        self.assertEqual(metafields[("custom", "width")], {"namespace": "custom", "key": "width",
+                                                          "type": "number_decimal", "value": "90.0"})
+        self.assertEqual(metafields[("custom", "care_instructions")]["type"], "multi_line_text_field")
+        self.assertEqual(metafields[("custom", "care_instructions")]["value"], "Wipe with a dry cloth.")
+        self.assertNotIn(("custom", "google_age_group"), metafields, "Google fields need Google Shopping on.")
+        self.assertEqual(metafields[("custom", "enable_google_shopping")]["value"], "false")
 
         publish = self.body(calls[4])["variables"]
         self.assertEqual(publish, {"id": PRODUCT_GID, "input": [{"publicationId": "gid://shopify/Publication/1"}]})
@@ -160,7 +170,9 @@ class TestShopifyPublish(ShopifyPublishCase):
         self.first_publish()
         self.template.materials = False
         deleted = gql({"metafieldsDelete": {"deletedMetafields": [], "userErrors": []}})
-        stock = gql({"inventorySetQuantities": {"inventoryAdjustmentGroup": {"id": "x"}, "userErrors": []}})
+        stock = gql({"inventorySetQuantities": {"inventoryAdjustmentGroup": {"id": "x", "changes": [
+            {"item": {"id": f"gid://shopify/InventoryItem/{n}"}, "location": {"id": "gid://shopify/Location/1"}}
+            for n in (1, 2)]}, "userErrors": []}})
         published = gql({"publishablePublish": {"userErrors": []}})
         _action, calls = self.run_publish(self.product_set_response(), deleted, stock, published)
 
@@ -174,6 +186,8 @@ class TestShopifyPublish(ShopifyPublishCase):
 
         to_delete = self.body(calls[1])["variables"]["metafields"]
         self.assertIn({"ownerId": PRODUCT_GID, "namespace": "custom", "key": "materials"}, to_delete)
+        self.assertNotIn("shopify--discovery--product_recommendation", {m["namespace"] for m in to_delete},
+                         "Missing metafields are not deleted: Shopify refuses it in reserved namespaces.")
 
         quantities = self.body(calls[2])["variables"]["input"]["quantities"]
         natural = next(q for q in quantities if q["inventoryItemId"] == "gid://shopify/InventoryItem/1")
@@ -209,8 +223,43 @@ class TestShopifyPublish(ShopifyPublishCase):
         self.template.write({"enable_google_shopping": True, "google_age_group": "adult", "google_gender": "unisex"})
         metafields = {(m["namespace"], m["key"]): m["value"]
                       for m in ProductPayloadBuilder(self.template, self.store).metafields()[0]}
-        self.assertEqual(metafields[("mm-google-shopping", "age_group")], "adult")
-        self.assertEqual(metafields[("mm-google-shopping", "condition")], "new")
+        self.assertEqual(metafields[("custom", "google_age_group")], "adult")
+        self.assertEqual(metafields[("custom", "google_condition")], "new")
+        self.assertEqual(metafields[("custom", "enable_google_shopping")], "true")
+
+    def test_gpsr_contact_parts(self):
+        metafields = {(m["namespace"], m["key"]): m["value"]
+                      for m in ProductPayloadBuilder(self.template, self.store).metafields()[0]}
+        name = metafields[("custom", "gpsr_manufacturer_name")]
+        address = metafields[("custom", "gpsr_manufacturer_address")]
+        self.assertEqual(name, self.template.gpsr_manufacturer_id.name)
+        self.assertIn("1 High Street", address)
+        self.assertNotIn(name, address, "The address metafield holds the address only.")
+        self.assertEqual(metafields[("custom", "gpsr_manufacturer_electronic_address")], "safety@example.com")
+
+    def test_dimension_and_rich_text_types(self):
+        """Partners can define Dimension and Rich text metafields instead; both are still supported."""
+        self.env.ref("js_shopify_connector.metafield_width").metafield_type = "dimension"
+        self.env.ref("js_shopify_connector.metafield_care_instructions").metafield_type = "rich_text_field"
+        metafields = {(m["namespace"], m["key"]): m["value"]
+                      for m in ProductPayloadBuilder(self.template, self.store).metafields()[0]}
+        self.assertEqual(json.loads(metafields[("custom", "width")]), {"value": 90.0, "unit": "cm"})
+        self.assertEqual(json.loads(metafields[("custom", "care_instructions")])["type"], "root")
+
+    def test_weight_on_product_with_variants(self):
+        variants = self.template.product_variant_ids
+        self.assertGreater(len(variants), 1)
+        self.assertEqual(self.template.weight, 8.5, "All variants weigh the same, so the product shows it.")
+
+        self.template.weight = 9.0
+        self.assertEqual(set(variants.mapped("weight")), {9.0}, "A product weight sets every variant.")
+
+        self.natural.weight = 10.0
+        self.assertEqual(self.template.weight, 0.0, "Different weights show as 0 on the product.")
+        self.template.write({"weight": 0.0})
+        self.assertEqual(self.natural.weight, 10.0, "0 never overwrites the variants' own weights.")
+        others = variants - self.natural
+        self.assertEqual(set(others.mapped("weight")), {9.0})
 
     def test_rich_text(self):
         value = json.loads(html_to_rich_text("<p>Wash at <b>30°</b>.</p><ul><li>Dry flat</li></ul>"))

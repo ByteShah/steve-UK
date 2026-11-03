@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import mimetypes
+import uuid
 
 from odoo import _, api, fields, models
 from odoo.exceptions import UserError
@@ -17,6 +18,7 @@ mutation ($input: ProductSetInput!, $identifier: ProductSetIdentifiers) {
       id
       handle
       variants(first: 250) { nodes { id sku inventoryItem { id } } }
+      metafields(first: 250) { nodes { namespace key } }
     }
     userErrors { field message code }
   }
@@ -50,10 +52,12 @@ mutation ($metafields: [MetafieldIdentifierInput!]!) {
 }
 """
 
+# Inventory mutations require an idempotency key (API 2026-04+). One key per request: a retry of the
+# same request reuses it, so Shopify applies it once.
 INVENTORY_SET_MUTATION = """
-mutation ($input: InventorySetQuantitiesInput!) {
-  inventorySetQuantities(input: $input) {
-    inventoryAdjustmentGroup { id }
+mutation ($input: InventorySetQuantitiesInput!, $idempotencyKey: String!) {
+  inventorySetQuantities(input: $input) @idempotent(key: $idempotencyKey) {
+    inventoryAdjustmentGroup { id changes(quantityNames: ["available"]) { item { id } location { id } } }
     userErrors { field message code }
   }
 }
@@ -61,9 +65,16 @@ mutation ($input: InventorySetQuantitiesInput!) {
 
 INVENTORY_BATCH = 250  # Shopify limit of quantities per inventorySetQuantities call
 
+# Which items are stocked at a location (inventoryLevel is null when they are not).
+INVENTORY_LEVELS_QUERY = """
+query ($ids: [ID!]!, $locationId: ID!) {
+  nodes(ids: $ids) { ... on InventoryItem { id inventoryLevel(locationId: $locationId) { id } } }
+}
+"""
+
 INVENTORY_ACTIVATE_MUTATION = """
-mutation ($inventoryItemId: ID!, $locationId: ID!) {
-  inventoryActivate(inventoryItemId: $inventoryItemId, locationId: $locationId) {
+mutation ($inventoryItemId: ID!, $locationId: ID!, $idempotencyKey: String!) {
+  inventoryActivate(inventoryItemId: $inventoryItemId, locationId: $locationId) @idempotent(key: $idempotencyKey) {
     inventoryLevel { id }
     userErrors { field message }
   }
@@ -196,8 +207,11 @@ class ProductTemplate(models.Model):
                              {"input": payload, "identifier": identifier}, product=self, mutation="productSet")
         self._shopify_write_ids(result["product"])
 
-        _set, empty = builder.metafields()
-        if empty and not is_new:
+        # Only delete what exists: Shopify refuses to delete a missing metafield in a reserved
+        # namespace, e.g. shopify--discovery--* on stores without the Search & Discovery app.
+        existing = {(node["namespace"], node["key"]) for node in result["product"]["metafields"]["nodes"]}
+        empty = [key for key in builder.metafields()[1] if key in existing]
+        if empty:
             self._shopify_delete_metafields(store, empty)
         existing_variants._shopify_push_stock(store)
         self._shopify_publish_on_channels(store)
@@ -279,9 +293,7 @@ class ProductTemplate(models.Model):
     # ------------------------------------------------------------------
     def _shopify_location_quantities(self, store, variants):
         """{variant id: {Shopify location ID: available quantity}} for mapped warehouses."""
-        warehouses = self.env["stock.warehouse"].sudo().search([
-            ("shopify_location_id.store_id", "=", store.id), ("shopify_location_id.active", "=", True),
-            ("company_id", "=", store.company_id.id)])
+        warehouses = store._get_stock_warehouses()
         result = {}
         for variant in variants.filtered("is_storable"):
             per_location = {}
@@ -309,30 +321,63 @@ class ProductProduct(models.Model):
         for start in range(0, len(rows), INVENTORY_BATCH):
             chunk = rows[start:start + INVENTORY_BATCH]
             try:
-                self._shopify_set_quantities(store, chunk, product)
+                result = self._shopify_set_quantities(store, chunk, product)
             except ShopifyError as error:
                 if "not stocked" not in str(error).lower():
                     raise
-                # A location linked after the variant was created: stock the items there first.
-                for row in chunk:
-                    store._call("sync_stock", INVENTORY_ACTIVATE_MUTATION, {
-                        "inventoryItemId": row["inventoryItemId"], "locationId": row["locationId"]},
-                        product=product, mutation="inventoryActivate")
+                # Older API versions refuse items not stocked at the location: stock them there first.
+                self._shopify_activate(store, chunk, product)
                 self._shopify_set_quantities(store, chunk, product)
+                continue
+            # Newer API versions skip such items silently. Shopify lists the rows it changed; for the
+            # others, check the item is stocked at the location (a location linked after the variant
+            # was created is not), stock it there and send its quantity again.
+            group = (result or {}).get("inventoryAdjustmentGroup") or {}
+            changed = {(c["item"]["id"], c["location"]["id"]) for c in group.get("changes") or []}
+            unchanged = [row for row in chunk if (row["inventoryItemId"], row["locationId"]) not in changed]
+            not_stocked = self._shopify_rows_not_stocked(store, unchanged, product)
+            if not_stocked:
+                self._shopify_activate(store, not_stocked, product)
+                self._shopify_set_quantities(store, not_stocked, product)
+
+    @api.model
+    def _shopify_rows_not_stocked(self, store, rows, product=False):
+        """The rows whose inventory item has no inventory level at the row's location."""
+        by_location = {}
+        for row in rows:
+            by_location.setdefault(row["locationId"], []).append(row)
+        missing = []
+        for location_id, location_rows in by_location.items():
+            data = store._call("sync_stock", INVENTORY_LEVELS_QUERY, {
+                "ids": [row["inventoryItemId"] for row in location_rows], "locationId": location_id},
+                product=product)
+            stocked = {node["id"] for node in data.get("nodes") or [] if node and node.get("inventoryLevel")}
+            missing += [row for row in location_rows if row["inventoryItemId"] not in stocked]
+        return missing
+
+    @api.model
+    def _shopify_activate(self, store, rows, product=False):
+        for row in rows:
+            store._call("sync_stock", INVENTORY_ACTIVATE_MUTATION, {
+                "inventoryItemId": row["inventoryItemId"], "locationId": row["locationId"],
+                "idempotencyKey": str(uuid.uuid4())},
+                product=product, mutation="inventoryActivate")
 
     @api.model
     def _shopify_set_quantities(self, store, rows, product=False):
         # Newer API versions compare-and-set with changeFromQuantity (null = no check);
         # older ones use ignoreCompareQuantity.
-        variables = {"input": {"name": "available", "reason": "correction",
+        variables = {"idempotencyKey": str(uuid.uuid4()),
+                     "input": {"name": "available", "reason": "correction",
                                "quantities": [dict(row, changeFromQuantity=None) for row in rows]}}
         try:
-            store._call("sync_stock", INVENTORY_SET_MUTATION, variables, product=product,
-                        mutation="inventorySetQuantities")
+            return store._call("sync_stock", INVENTORY_SET_MUTATION, variables, product=product,
+                               mutation="inventorySetQuantities")
         except ShopifyError as error:
             if "changeFromQuantity" not in str(error):
                 raise
-            variables = {"input": {"name": "available", "reason": "correction", "ignoreCompareQuantity": True,
+            variables = {"idempotencyKey": str(uuid.uuid4()),
+                         "input": {"name": "available", "reason": "correction", "ignoreCompareQuantity": True,
                                    "quantities": rows}}
-            store._call("sync_stock", INVENTORY_SET_MUTATION, variables, product=product,
-                        mutation="inventorySetQuantities")
+            return store._call("sync_stock", INVENTORY_SET_MUTATION, variables, product=product,
+                               mutation="inventorySetQuantities")

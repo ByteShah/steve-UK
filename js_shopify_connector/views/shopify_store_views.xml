@@ -129,6 +129,7 @@
                 <field name="key"/>
                 <field name="metafield_type"/>
                 <field name="dimension_unit" invisible="metafield_type != 'dimension'"/>
+                <field name="partner_part" optional="show"/>
                 <field name="condition_field_id" options="{'no_create': True}" optional="show"/>
                 <field name="note"/>
                 <field name="active" column_invisible="1"/>

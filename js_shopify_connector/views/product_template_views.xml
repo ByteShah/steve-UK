@@ -5,6 +5,19 @@
         <field name="model">product.template</field>
         <field name="inherit_id" ref="product.product_template_only_form_view"/>
         <field name="arch" type="xml">
+            <!-- Weight: standard Odoo hides it once a product has variants; here it sets all variants. -->
+            <xpath expr="//label[@for='weight']" position="attributes">
+                <attribute name="invisible">False</attribute>
+            </xpath>
+            <xpath expr="//div[@name='weight']" position="attributes">
+                <attribute name="invisible">False</attribute>
+            </xpath>
+            <xpath expr="//div[@name='weight']" position="after">
+                <div class="text-muted small" colspan="2" invisible="product_variant_count &lt;= 1">
+                    Sets the weight of every variant. 0 means the variants have different weights:
+                    edit each one in the Shopify tab's variants table.
+                </div>
+            </xpath>
             <xpath expr="//notebook" position="inside">
                 <page string="Shopify" name="shopify">
                     <div class="alert alert-danger" role="alert" invisible="shopify_sync_state != 'error'">
@@ -74,15 +87,15 @@
                         </group>
                     </group>
                     <group string="Variants" name="shopify_variants" invisible="not shopify_enabled">
-                        <field name="product_variant_ids" nolabel="1" colspan="2" readonly="1">
-                            <list>
+                        <field name="product_variant_ids" nolabel="1" colspan="2">
+                            <list editable="bottom" create="0" delete="0">
                                 <field name="product_template_attribute_value_ids" widget="many2many_tags"
-                                       string="Options"/>
-                                <field name="default_code" string="SKU"/>
-                                <field name="barcode"/>
-                                <field name="lst_price" string="Price"/>
-                                <field name="standard_price" string="Cost" optional="show"/>
-                                <field name="weight" optional="show"/>
+                                       string="Options" readonly="1"/>
+                                <field name="default_code" string="SKU" readonly="1"/>
+                                <field name="barcode" readonly="1"/>
+                                <field name="lst_price" string="Price" readonly="1"/>
+                                <field name="standard_price" string="Cost" optional="show" readonly="1"/>
+                                <field name="weight" optional="show" string="Weight (kg)"/>
                                 <field name="qty_available" string="On Hand" optional="show"/>
                                 <field name="shopify_variant_id" optional="hide"/>
                                 <field name="shopify_inventory_item_id" optional="hide"/>

@@ -69,7 +69,10 @@ class TestShopifyProduct(TransactionCase):
             self._ready_product(default_code="SN-PET-CDB-2", barcode="5060000000024")
 
     def test_only_uk_territory(self):
-        other = self.env["product.territory"].create({"code": "99", "name": "Elsewhere"})
+        Territory = self.env["product.territory"].with_context(active_test=False)
+        used = set(Territory.search([]).mapped("code"))
+        code = next(f"{n:02d}" for n in range(99, 1, -1) if f"{n:02d}" not in used)
+        other = Territory.create({"code": code, "name": "Elsewhere"})
         with self.assertRaises(ValidationError):
             self.Template.create({"name": "Lamp", "territory_id": other.id, "shopify_enabled": True})
 

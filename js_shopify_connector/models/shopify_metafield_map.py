@@ -35,6 +35,11 @@ class ShopifyMetafieldMap(models.Model):
         "ir.model.fields", string="Only When", ondelete="set null",
         domain="[('model', '=', 'product.template'), ('ttype', '=', 'boolean')]",
         help="Boolean field that must be on for this metafield to be sent, e.g. Google Shopping.")
+    partner_part = fields.Selection(
+        [("full", "Name, address and email"), ("name", "Name"), ("address", "Postal address"),
+         ("contact", "Email (or phone)")],
+        string="Contact Part", default="full",
+        help="For contact fields (GPSR): which part of the contact this metafield holds.")
     note = fields.Char(help="For the Shopify partner: what this metafield shows.")
 
     _key_uniq = models.Constraint("unique(namespace, key)", "Each metafield namespace and key is mapped once.")

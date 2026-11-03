@@ -1,6 +1,7 @@
 import logging
 import re
 import time
+from collections import defaultdict
 
 from odoo import _, api, fields, models
 from odoo.exceptions import ValidationError
@@ -142,7 +143,7 @@ class ShopifyStore(models.Model):
     # ------------------------------------------------------------------
     # Calls with logging
     # ------------------------------------------------------------------
-    def _call(self, operation, query, variables=None, product=False, mutation=None):
+    def _call(self, operation, query, variables=None, product=False, mutation=None, order=False):
         """Run a GraphQL call and log it. Raises ShopifyError after logging the failure.
         With `mutation`, its userErrors count as a failure and its result node is returned."""
         self.ensure_one()
@@ -154,10 +155,11 @@ class ShopifyStore(models.Model):
         except ShopifyError as error:
             self.env["shopify.sync.log"]._log(
                 self, operation, "error", str(error), product=product, request=variables,
-                response=error.response, duration=time.monotonic() - started)
+                response=error.response, duration=time.monotonic() - started, order=order)
             raise
         self.env["shopify.sync.log"]._log(
-            self, operation, "success", product=product, request=variables, duration=time.monotonic() - started)
+            self, operation, "success", product=product, request=variables, duration=time.monotonic() - started,
+            order=order)
         return data
 
     def _paginate(self, operation, query, connection):
@@ -291,6 +293,22 @@ class ShopifyStore(models.Model):
             ("shopify_location_id.store_id", "=", self.id), ("shopify_location_id.active", "=", True),
             ("company_id", "=", self.company_id.id)])
 
+    def _shopify_held_quantities(self, variants):
+        """{(variant id, warehouse id): quantity} on Shopify orders still in quotation.
+
+        Shopify takes ordered items out of its available stock as soon as the order is placed,
+        paid or not. A quotation reserves nothing in Odoo, so without this the stock sync would
+        put those items back on sale in Shopify."""
+        self.ensure_one()
+        held = defaultdict(float)
+        lines = self.env["sale.order.line"].sudo().search([
+            ("order_id.shopify_store_id", "=", self.id), ("order_id.state", "in", ("draft", "sent")),
+            ("product_id", "in", variants.ids)])
+        for line in lines:
+            quantity = line.product_uom_id._compute_quantity(line.product_uom_qty, line.product_id.uom_id)
+            held[(line.product_id.id, line.order_id.warehouse_id.id)] += quantity
+        return held
+
     def _shopify_resend_all_stock(self):
         """A warehouse link changed: the next stock run sends every variant, not only the ones
         whose stock moved, so stock that was already there reaches the new location."""
@@ -324,6 +342,10 @@ class ShopifyStore(models.Model):
                 [("write_date", ">=", since)], ["product_id"])}
             moved |= {product.id for [product] in self.env["stock.quant"]._read_group(
                 [("write_date", ">=", since)], ["product_id"])}
+            # Shopify quotations hold stock without a stock move (see _shopify_held_quantities).
+            moved |= {product.id for [product] in self.env["sale.order.line"].sudo()._read_group(
+                [("order_id.shopify_store_id", "=", self.id), ("order_id.write_date", ">=", since),
+                 ("product_id", "!=", False)], ["product_id"])}
             domain.append(("id", "in", list(moved)))
         variants = Variant.search(domain)
         try:

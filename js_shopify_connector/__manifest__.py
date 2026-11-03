@@ -1,6 +1,6 @@
 {
     "name": "Shopify Connector",
-    "summary": "Publish Odoo products and their variants to Shopify.",
+    "summary": "Publish Odoo products and their variants to Shopify and import Shopify orders.",
     "description": """
 Product data sent to Shopify, kept on Odoo products.
 
@@ -13,10 +13,14 @@ Product data sent to Shopify, kept on Odoo products.
   stock per location and sales channels in one go; Shopify IDs written back
 * Changes to published products mark them To Sync; a cron updates them every 15 minutes,
   archives them in Shopify when archived in Odoo, and sends stock changes every 5 minutes
+* Shopify orders imported every 5 minutes as sales orders of the store's company: customer
+  matched or created, lines matched by variant ID then SKU at the prices charged, discounts
+  and shipping lines; paid orders confirmed, pending ones kept as quotations, anything that
+  does not match held back as "Needs attention"
 * Sales > Configuration > Shopify: store connection (Admin GraphQL API), locations,
   sales channels, metafield mapping and the sync log
 """,
-    "version": "19.0.1.5.0",
+    "version": "19.0.1.6.1",
     "category": "Sales/Sales",
     "author": "Codecrafters",
     "license": "LGPL-3",
@@ -33,6 +37,9 @@ Product data sent to Shopify, kept on Odoo products.
         "views/stock_warehouse_views.xml",
         "data/ir_actions_server.xml",
         "data/ir_cron.xml",
+        "data/shopify_order_data.xml",
+        "views/sale_order_views.xml",
+        "views/res_partner_views.xml",
     ],
     "installable": True,
 }

@@ -11,6 +11,7 @@ class ShopifySyncLog(models.Model):
 
     store_id = fields.Many2one("shopify.store", required=True, ondelete="cascade", index=True)
     product_tmpl_id = fields.Many2one("product.template", string="Product", ondelete="set null", index=True)
+    sale_order_id = fields.Many2one("sale.order", string="Sales Order", ondelete="set null", index="btree_not_null")
     operation = fields.Selection([
         ("test_connection", "Test Connection"),
         ("fetch_locations", "Load Locations"),
@@ -19,6 +20,7 @@ class ShopifySyncLog(models.Model):
         ("sync_product", "Update Product"),
         ("upload_media", "Upload Images"),
         ("sync_stock", "Update Stock"),
+        ("import_orders", "Import Orders"),
         ("other", "Other"),
     ], required=True)
     state = fields.Selection([("success", "Success"), ("error", "Error")], required=True)
@@ -28,12 +30,14 @@ class ShopifySyncLog(models.Model):
     duration = fields.Float(string="Duration (s)", digits=(10, 2))
 
     @api.model
-    def _log(self, store, operation, state, message=False, product=False, request=None, response=None, duration=0.0):
+    def _log(self, store, operation, state, message=False, product=False, request=None, response=None, duration=0.0,
+             order=False):
         if request is not None and not isinstance(request, str):
             request = json.dumps(request, indent=1, default=str)[:20000]
         return self.sudo().create({
             "store_id": store.id,
             "product_tmpl_id": product and product.id,
+            "sale_order_id": order and order.id,
             "operation": operation,
             "state": state,
             "message": message,

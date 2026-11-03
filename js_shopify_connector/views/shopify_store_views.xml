@@ -16,10 +16,15 @@
                             invisible="state != 'connected'"/>
                     <button name="action_sync_stock_now" type="object" string="Send All Stock"
                             invisible="state != 'connected'"/>
+                    <button name="action_import_orders_now" type="object" string="Import Orders Now"
+                            invisible="state != 'connected' or not import_orders"/>
                     <field name="state" widget="statusbar"/>
                 </header>
                 <sheet>
                     <div class="oe_button_box" name="button_box">
+                        <button name="action_view_orders" type="object" class="oe_stat_button" icon="fa-shopping-cart">
+                            <field name="order_count" widget="statinfo" string="Orders"/>
+                        </button>
                         <button name="action_view_logs" type="object" class="oe_stat_button" icon="fa-list-alt">
                             <field name="log_count" widget="statinfo" string="Sync Log"/>
                         </button>
@@ -61,7 +66,8 @@
                     <div class="text-muted small" invisible="state == 'connected'">
                         The Shopify app needs these Admin API access scopes:
                         read_products, write_products, read_inventory, write_inventory, read_locations,
-                        read_publications, write_publications, read_files, write_files.
+                        read_publications, write_publications, read_files, write_files, and read_orders
+                        to import orders (with access to customer names, emails, phones and addresses).
                     </div>
                     <notebook>
                         <page string="Locations" name="locations">
@@ -76,6 +82,33 @@
                             </field>
                             <div class="text-muted small">Link a warehouse to a location on the warehouse form
                                 (Inventory › Configuration › Warehouses).</div>
+                        </page>
+                        <page string="Orders" name="orders">
+                            <group>
+                                <group string="Import">
+                                    <field name="import_orders" widget="boolean_toggle"/>
+                                    <field name="orders_import_from" invisible="not import_orders"
+                                           required="import_orders"/>
+                                    <field name="orders_synced_until" invisible="not import_orders"/>
+                                    <field name="import_test_orders" invisible="not import_orders"/>
+                                    <field name="auto_confirm_orders" invisible="not import_orders"/>
+                                    <field name="order_responsible_id" invisible="not import_orders"
+                                           options="{'no_create': True}"/>
+                                </group>
+                                <group string="New Sales Orders">
+                                    <field name="order_team_id" options="{'no_create': True}"/>
+                                    <field name="order_pricelist_id" options="{'no_create': True}"/>
+                                    <field name="order_warehouse_id" options="{'no_create': True}"
+                                           placeholder="Warehouse linked to the Shopify location"/>
+                                    <field name="order_shipping_product_id" options="{'no_create': True}"/>
+                                    <field name="order_discount_product_id" options="{'no_create': True}"/>
+                                </group>
+                            </group>
+                            <div class="text-muted small">
+                                Paid and authorised orders are confirmed; orders waiting for payment stay as
+                                quotations until Shopify reports them paid. Orders with an unknown SKU or a total
+                                that does not match are kept as quotations marked Needs Attention.
+                            </div>
                         </page>
                         <page string="Sales Channels" name="publications">
                             <field name="publication_ids">

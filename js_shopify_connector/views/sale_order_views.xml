@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_order_form_shopify" model="ir.ui.view">
+        <field name="name">sale.order.form.shopify</field>
+        <field name="model">sale.order</field>
+        <field name="inherit_id" ref="sale.view_order_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//header" position="inside">
+                <button name="action_shopify_open_order" type="object" string="Open in Shopify"
+                        invisible="not shopify_order_id"/>
+                <button name="action_shopify_reimport" type="object" string="Re-import from Shopify"
+                        invisible="not shopify_order_id or state not in ('draft', 'sent')"
+                        groups="js_shopify_connector.group_shopify_manager"/>
+            </xpath>
+            <xpath expr="//sheet" position="before">
+                <div class="alert alert-danger mb-0" role="alert" invisible="not shopify_import_issue">
+                    <strong>Shopify order needs attention.</strong>
+                    <field name="shopify_import_issue" class="d-block"/>
+                </div>
+            </xpath>
+            <xpath expr="//page[@name='other_information']" position="before">
+                <page string="Shopify" name="shopify" invisible="not shopify_order_id">
+                    <group>
+                        <group>
+                            <field name="shopify_order_name"/>
+                            <field name="shopify_store_id"/>
+                            <field name="shopify_updated_at"/>
+                        </group>
+                        <group>
+                            <field name="shopify_financial_status"/>
+                            <field name="shopify_fulfillment_status"/>
+                            <field name="shopify_total"/>
+                            <field name="shopify_order_id" groups="base.group_no_one"/>
+                        </group>
+                    </group>
+                </page>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_sales_order_filter_shopify" model="ir.ui.view">
+        <field name="name">sale.order.search.shopify</field>
+        <field name="model">sale.order</field>
+        <field name="inherit_id" ref="sale.view_sales_order_filter"/>
+        <field name="arch" type="xml">
+            <field name="partner_id" position="before">
+                <field name="shopify_order_name"/>
+            </field>
+            <filter name="my_sale_orders_filter" position="after">
+                <separator/>
+                <filter name="from_shopify" string="From Shopify" domain="[('shopify_order_id', '!=', False)]"/>
+                <filter name="shopify_attention" string="Needs Attention" domain="[('shopify_import_issue', '!=', False)]"/>
+                <filter name="shopify_payment_pending" string="Payment Pending"
+                        domain="[('shopify_financial_status', '=', 'pending')]"/>
+            </filter>
+            <filter name="customer" position="after">
+                <filter name="groupby_shopify_payment" string="Shopify Payment"
+                        context="{'group_by': 'shopify_financial_status'}"/>
+            </filter>
+        </field>
+    </record>
+
+    <record id="view_order_tree_shopify" model="ir.ui.view">
+        <field name="name">sale.order.list.shopify</field>
+        <field name="model">sale.order</field>
+        <field name="mode">primary</field>
+        <field name="inherit_id" ref="sale.sale_order_tree"/>
+        <field name="arch" type="xml">
+            <field name="partner_id" position="before">
+                <field name="shopify_order_name" string="Shopify Order"/>
+            </field>
+            <field name="state" position="after">
+                <field name="shopify_financial_status" optional="show" widget="badge"
+                       decoration-success="shopify_financial_status in ('paid', 'authorized')"
+                       decoration-warning="shopify_financial_status in ('pending', 'partially_paid')"
+                       decoration-danger="shopify_financial_status in ('voided', 'expired', 'refunded')"/>
+                <field name="shopify_import_issue" string="Needs Attention" optional="show"
+                       decoration-danger="shopify_import_issue"/>
+            </field>
+        </field>
+    </record>
+
+    <record id="action_shopify_orders" model="ir.actions.act_window">
+        <field name="name">Shopify Orders</field>
+        <field name="res_model">sale.order</field>
+        <field name="view_mode">list,form,kanban,pivot,graph,activity</field>
+        <field name="view_id" ref="view_order_tree_shopify"/>
+        <field name="domain">[('shopify_order_id', '!=', False)]</field>
+        <field name="context">{'create': False}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_empty_folder">No Shopify orders yet</p>
+            <p>Turn on Import Orders on the Shopify store (Sales › Configuration › Shopify › Store, Orders tab).
+                Orders placed on Shopify then appear here within 5 minutes.</p>
+        </field>
+    </record>
+
+    <menuitem id="menu_shopify_orders" name="Shopify Orders" parent="sale.sale_order_menu"
+              action="action_shopify_orders" sequence="25" groups="sales_team.group_sale_salesman"/>
+</odoo>

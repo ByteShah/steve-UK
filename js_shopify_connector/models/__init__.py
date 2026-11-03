@@ -10,3 +10,6 @@ from . import product_template_shopify_sync
 from . import shopify_change_tracking
 from . import product_product
 from . import stock_warehouse
+from . import res_partner
+from . import sale_order
+from . import shopify_order_import

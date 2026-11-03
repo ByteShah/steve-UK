@@ -294,11 +294,12 @@ class ProductTemplate(models.Model):
     def _shopify_location_quantities(self, store, variants):
         """{variant id: {Shopify location ID: available quantity}} for mapped warehouses."""
         warehouses = store._get_stock_warehouses()
+        held = store._shopify_held_quantities(variants)
         result = {}
         for variant in variants.filtered("is_storable"):
             per_location = {}
             for warehouse in warehouses:
-                qty = variant.with_context(warehouse_id=warehouse.id).free_qty
+                qty = variant.with_context(warehouse_id=warehouse.id).free_qty - held.get((variant.id, warehouse.id), 0)
                 location_id = warehouse.shopify_location_id.shopify_id
                 per_location[location_id] = per_location.get(location_id, 0) + max(0, int(qty))
             result[variant.id] = per_location

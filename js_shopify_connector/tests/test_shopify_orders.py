@@ -220,3 +220,115 @@ class TestShopifyOrders(ShopifyPublishCase):
         self.assertEqual(count, 1, "The variant on the new Shopify quotation is sent.")
         sent = self.body(calls[0])["variables"]["input"]["quantities"]
         self.assertEqual([(q["inventoryItemId"], q["quantity"]) for q in sent], [("gid://shopify/InventoryItem/1", 23)])
+
+    # ------------------------------------------------------------------
+    # Task 3.2: customers and addresses
+    # ------------------------------------------------------------------
+    @staticmethod
+    def address(first="Jane", last="Doe", street="10 Downing Street", city="London", zip_code="SW1A 2AA",
+                company=None, province=None, phone=None):
+        return {"name": f"{first} {last}", "firstName": first, "lastName": last, "company": company,
+                "address1": street, "address2": None, "city": city, "zip": zip_code, "province": province,
+                "provinceCode": None, "countryCodeV2": "GB", "phone": phone}
+
+    def gift_node(self, number):
+        return self.order_node(number, billingAddress=self.address(), shippingAddress=self.address(
+            "Margaret", "Doe", "1 Minster Yard", "York", "YO1 7HH", province="North Yorkshire"))
+
+    def test_same_address_adds_no_contacts(self):
+        self.run_import(self.order_node(billingAddress=self.address()))
+        order = self.find()
+        customer = order.partner_id
+        self.assertEqual((order.partner_invoice_id, order.partner_shipping_id), (customer, customer))
+        self.assertFalse(customer.child_ids)
+        # Same place written differently: no new address either.
+        self.run_import(self.order_node(1002, shippingAddress=self.address(zip_code="sw1a2aa", city="LONDON")))
+        self.assertEqual(self.find(1002).partner_shipping_id, customer)
+        self.assertFalse(customer.child_ids, "Capitals and spaces in the postcode do not make a new address.")
+
+    def test_gift_goes_to_a_delivery_address(self):
+        self.run_import(self.gift_node(1001))
+        order = self.find()
+        customer = order.partner_id
+        self.assertEqual(customer.street, "10 Downing Street", "A new customer gets the billing address.")
+        self.assertEqual(order.partner_invoice_id, customer)
+        delivery = order.partner_shipping_id
+        self.assertEqual((delivery.parent_id, delivery.type, delivery.name, delivery.city),
+                         (customer, "delivery", "Margaret Doe", "York"))
+        self.assertEqual(delivery.state_id.name, "North Yorkshire", "County matched by name.")
+        self.assertEqual(order.picking_ids.partner_id, delivery, "The delivery order goes to the gift address.")
+
+        self.run_import(self.gift_node(1002))
+        self.assertEqual(self.find(1002).partner_shipping_id, delivery, "The same gift address is reused.")
+        self.assertEqual(len(customer.child_ids), 1)
+
+    def test_company_shows_on_the_delivery_address(self):
+        self.run_import(self.order_node(billingAddress=self.address(), shippingAddress=self.address(
+            street="1 Work Park", city="Leeds", zip_code="LS1 1AA", company="Acme Ltd")))
+        order = self.find()
+        self.assertEqual(order.partner_id.name, "Jane Doe")
+        self.assertEqual(order.partner_id.company_type, "person")
+        self.assertEqual(order.partner_shipping_id.name, "Jane Doe (Acme Ltd)")
+
+    def test_existing_contact_is_not_overwritten(self):
+        jane = self.env["res.partner"].create({
+            "name": "Jane Doe (Saxby)", "email": "jane@example.com", "phone": "0113 000 0000",
+            "street": "5 Park Row", "city": "Leeds", "zip": "LS1 5AB"})
+        self.run_import(self.order_node(billingAddress=self.address()))
+        order = self.find()
+        self.assertEqual(order.partner_id, jane)
+        self.assertEqual((jane.name, jane.phone, jane.street), ("Jane Doe (Saxby)", "0113 000 0000", "5 Park Row"),
+                         "Odoo is the master: name, phone and address are kept.")
+        self.assertEqual((order.partner_invoice_id.type, order.partner_invoice_id.street),
+                         ("invoice", "10 Downing Street"))
+        self.assertEqual((order.partner_shipping_id.type, order.partner_shipping_id.street),
+                         ("delivery", "10 Downing Street"))
+
+    def test_empty_contact_is_completed(self):
+        jane = self.env["res.partner"].create({"name": "Existing Buyer", "email": "jane@example.com"})
+        self.run_import(self.order_node())
+        order = self.find()
+        self.assertEqual(order.partner_id, jane)
+        self.assertEqual((jane.street, jane.phone), ("10 Downing Street", "+447700900123"),
+                         "Empty fields are filled from Shopify.")
+        self.assertEqual(order.partner_shipping_id, jane, "Same place: no extra address despite another name.")
+
+    def test_trade_contacts_are_not_used(self):
+        Partner = self.env["res.partner"]
+        trade = Partner.create({"name": "Doe Interiors", "is_company": True, "email": "jane@example.com"})
+        Partner.create({"name": "Jane at Doe Interiors", "parent_id": trade.id, "email": "jane@example.com"})
+        holdings = self.env["res.company"].create({"name": "Test Holdings"})
+        Partner.create({"name": "Jane (Holdings)", "email": "jane@example.com", "company_id": holdings.id})
+        self.run_import(self.order_node())
+        customer = self.find().partner_id
+        self.assertEqual(customer.name, "Jane Doe", "A private contact is created for the web order.")
+        self.assertFalse(customer.parent_id or customer.company_id)
+
+    def test_guest_without_email(self):
+        self.run_import(self.order_node(customer=None, email=None,
+                                        shippingAddress=self.address("Sam", "Guest", phone="+441130000000")))
+        customer = self.find().partner_id
+        self.assertEqual((customer.name, customer.phone, customer.email), ("Sam Guest", "+441130000000", False))
+        self.assertFalse(customer.shopify_customer_id)
+
+    def test_address_changed_before_shipping(self):
+        self.run_import(self.order_node())
+        order = self.find()
+        self.run_import(self.gift_node(1001))
+        self.assertEqual(order.partner_shipping_id.city, "York")
+        self.assertEqual(order.picking_ids.partner_id, order.partner_shipping_id,
+                         "The open delivery order follows the new address.")
+        self.assertFalse(order.shopify_import_issue)
+
+    def test_address_changed_after_shipping(self):
+        self.run_import(self.order_node())
+        order = self.find()
+        customer = order.partner_id
+        for move in order.picking_ids.move_ids:
+            move.quantity = move.product_uom_qty
+        order.picking_ids.move_ids.picked = True
+        order.picking_ids._action_done()
+        self.run_import(self.gift_node(1001))
+        self.assertEqual(order.partner_shipping_id, customer, "A shipped order is not changed.")
+        self.assertIn("after the order was shipped", order.shopify_import_issue)
+        self.assertTrue(order.activity_ids)

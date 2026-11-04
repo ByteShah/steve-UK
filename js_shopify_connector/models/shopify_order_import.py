@@ -11,13 +11,15 @@ from ..services.shopify_client import ShopifyError
 
 _logger = logging.getLogger(__name__)
 
+ADDRESS = "name firstName lastName company address1 address2 city zip province provinceCode countryCodeV2 phone"
+
 ORDER_FIELDS = """
   id name createdAt updatedAt cancelledAt test
   displayFinancialStatus displayFulfillmentStatus
   currencyCode taxesIncluded note email phone
   customer { id email firstName lastName phone }
-  shippingAddress { firstName lastName company address1 address2 city zip provinceCode countryCodeV2 phone }
-  billingAddress { firstName lastName company address1 address2 city zip provinceCode countryCodeV2 phone }
+  shippingAddress { %s }
+  billingAddress { %s }
   totalPriceSet { shopMoney { amount currencyCode } }
   lineItems(first: 100) {
     nodes { id sku name quantity variant { id }
@@ -29,7 +31,7 @@ ORDER_FIELDS = """
     nodes { title code originalPriceSet { shopMoney { amount } }
       discountAllocations { allocatedAmountSet { shopMoney { amount } } } }
   }
-"""
+""" % (ADDRESS, ADDRESS)
 
 # 25 orders of up to 100 items cost about 650 of the 1000 points a single query may use.
 ORDERS_QUERY = """
@@ -233,13 +235,17 @@ class ShopifyStore(models.Model):
             else:
                 if rebuild:
                     order.order_line.unlink()
+                    order.partner_invoice_id = self._shopify_order_address(
+                        order.partner_id, self._shopify_address_values(node.get("billingAddress")), "invoice")
                     self._shopify_build_lines(order, node)
+                self._shopify_sync_delivery_address(order, node)
                 self._shopify_after_import(order, node, status)
-        elif order.state == "sale" and cancelled and not order.shopify_import_issue:
+        elif order.state == "sale" and cancelled:
             # Cancelling a confirmed order (stock, invoice, delivery) is Task 3.5: tell a person.
-            issue = _("Cancelled in Shopify after the order was confirmed in Odoo. Cancel the delivery and order here.")
-            order.shopify_import_issue = issue
-            self._shopify_flag(order, issue)
+            self._shopify_add_issue(order, _(
+                "Cancelled in Shopify after the order was confirmed in Odoo. Cancel the delivery and order here."))
+        elif order.state == "sale":
+            self._shopify_sync_delivery_address(order, node)
         return order, False
 
     def _shopify_status_values(self, node):
@@ -259,7 +265,7 @@ class ShopifyStore(models.Model):
         warehouse = self.order_warehouse_id or self._get_stock_warehouses()[:1]
         vals = {
             "company_id": self.company_id.id,
-            "partner_id": partner.id,
+            **self._shopify_address_order_values(partner, node),
             "date_order": _shopify_datetime(node.get("createdAt")) or fields.Datetime.now(),
             "client_order_ref": node["name"],
             "origin": _("Shopify %s", node["name"]),
@@ -276,46 +282,6 @@ class ShopifyStore(models.Model):
         if self.order_pricelist_id:
             vals["pricelist_id"] = self.order_pricelist_id.id
         return vals
-
-    # ------------------------------------------------------------------
-    # Customer
-    # ------------------------------------------------------------------
-    def _shopify_find_partner(self, node):
-        """Contact by Shopify customer ID, then by email; otherwise a new individual contact."""
-        Partner = self.env["res.partner"].sudo()
-        customer = node.get("customer") or {}
-        email = (customer.get("email") or node.get("email") or "").strip()
-        partner = Partner.browse()
-        if customer.get("id"):
-            partner = Partner.search([("shopify_customer_id", "=", customer["id"])], limit=1)
-        if not partner and email:
-            partner = Partner.search([("email", "=ilike", email)], limit=1, order="id")
-        if partner:
-            if customer.get("id") and not partner.shopify_customer_id:
-                partner.shopify_customer_id = customer["id"]
-            return partner
-
-        address = node.get("shippingAddress") or node.get("billingAddress") or {}
-        name = " ".join(filter(None, [customer.get("firstName") or address.get("firstName"),
-                                      customer.get("lastName") or address.get("lastName")])).strip()
-        country = self.env["res.country"].search([("code", "=", address.get("countryCodeV2"))], limit=1) \
-            if address.get("countryCodeV2") else self.env["res.country"]
-        state = self.env["res.country.state"].search(
-            [("country_id", "=", country.id), ("code", "=", address.get("provinceCode"))], limit=1) \
-            if country and address.get("provinceCode") else self.env["res.country.state"]
-        return Partner.create({
-            "name": name or email or _("Shopify customer %s", node["name"]),
-            "company_type": "person",
-            "email": email or False,
-            "phone": customer.get("phone") or node.get("phone") or address.get("phone") or False,
-            "street": address.get("address1") or False,
-            "street2": address.get("address2") or False,
-            "city": address.get("city") or False,
-            "zip": address.get("zip") or False,
-            "country_id": country.id or False,
-            "state_id": state.id or False,
-            "shopify_customer_id": customer.get("id") or False,
-        })
 
     # ------------------------------------------------------------------
     # Lines
@@ -410,6 +376,13 @@ class ShopifyStore(models.Model):
         except UserError as error:
             order.shopify_import_issue = _("Could not be confirmed: %s", error)
             self._shopify_flag(order, order.shopify_import_issue)
+
+    def _shopify_add_issue(self, order, issue):
+        """Add a problem found after the order was imported, once, and tell a person."""
+        issues = (order.shopify_import_issue or "").splitlines()
+        if issue not in issues:
+            order.shopify_import_issue = "\n".join(issues + [issue])
+            self._shopify_flag(order, issue)
 
     def _shopify_flag(self, order, issue):
         user = self.order_responsible_id or self.env.ref("base.user_admin", raise_if_not_found=False)

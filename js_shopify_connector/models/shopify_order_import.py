@@ -14,13 +14,14 @@ _logger = logging.getLogger(__name__)
 ADDRESS = "name firstName lastName company address1 address2 city zip province provinceCode countryCodeV2 phone"
 
 ORDER_FIELDS = """
-  id name createdAt updatedAt cancelledAt test
+  id name createdAt updatedAt cancelledAt cancelReason test
   displayFinancialStatus displayFulfillmentStatus
   currencyCode taxesIncluded note email phone
   customer { id email firstName lastName phone }
   shippingAddress { %s }
   billingAddress { %s }
   totalPriceSet { shopMoney { amount currencyCode } }
+  totalRefundedSet { shopMoney { amount } }
   lineItems(first: 100) {
     nodes { id sku name quantity variant { id }
       originalUnitPriceSet { shopMoney { amount } }
@@ -245,13 +246,11 @@ class ShopifyStore(models.Model):
                     self._shopify_build_lines(order, node)
                 self._shopify_sync_delivery_address(order, node)
                 self._shopify_after_import(order, node, status)
-        elif order.state == "sale" and cancelled:
-            # Cancelling a confirmed order (stock, invoice, delivery) is Task 3.5: tell a person.
-            self._shopify_add_issue(order, _(
-                "Cancelled in Shopify after the order was confirmed in Odoo. Cancel the delivery and order here."))
         elif order.state == "sale":
-            self._shopify_sync_delivery_address(order, node)
+            if not cancelled:
+                self._shopify_sync_delivery_address(order, node)
             self._shopify_invoice_and_pay(order, node)
+            self._shopify_follow_refunds(order, node, cancelled)
         return order, False
 
     def _shopify_status_values(self, node):

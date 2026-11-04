@@ -121,6 +121,12 @@
                                     <field name="notify_customer_on_shipment" widget="boolean_toggle"
                                            invisible="not send_fulfillments"/>
                                 </group>
+                                <group string="Cancellations and Refunds">
+                                    <field name="process_refunds" widget="boolean_toggle"/>
+                                    <field name="refunds_from" invisible="not process_refunds"/>
+                                    <field name="refund_product_id" invisible="not process_refunds"
+                                           options="{'no_create': True}" placeholder="Shopify Refund Adjustment"/>
+                                </group>
                             </group>
                             <separator string="Shipping Methods"/>
                             <div class="text-muted small mb-2">
@@ -140,7 +146,9 @@
                                 that does not match are kept as quotations marked Needs Attention.
                                 Once Shopify has taken the money, the order is invoiced and the payment recorded
                                 in the Payments Journal. When its delivery is validated, the items are marked
-                                fulfilled in Shopify with the tracking number.
+                                fulfilled in Shopify with the tracking number. Cancellations and refunds made in
+                                Shopify reduce or cancel the delivery, create a credit note with the refund payment,
+                                and a return receipt for restocked items.
                             </div>
                         </page>
                         <page string="Sales Channels" name="publications">

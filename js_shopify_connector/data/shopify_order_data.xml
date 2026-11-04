@@ -23,6 +23,14 @@
             <field name="invoice_policy">order</field>
             <field name="list_price">0.0</field>
         </record>
+        <record id="product_shopify_refund_adjustment" model="product.product">
+            <field name="name">Shopify Refund Adjustment</field>
+            <field name="type">service</field>
+            <field name="sale_ok" eval="False"/>
+            <field name="purchase_ok" eval="False"/>
+            <field name="invoice_policy">order</field>
+            <field name="list_price">0.0</field>
+        </record>
     </data>
 
     <record id="ir_cron_shopify_import_orders" model="ir.cron">

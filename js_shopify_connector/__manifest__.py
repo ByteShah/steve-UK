@@ -19,10 +19,12 @@ Product data sent to Shopify, kept on Odoo products.
   does not match held back as "Needs attention"
 * Paid orders invoiced and their Shopify payments registered; shipping rates mapped to delivery methods
 * Validated deliveries sent back as Shopify fulfilments with tracking (partial deliveries too)
+* Shopify cancellations and refunds followed: deliveries reduced or cancelled, credit notes with
+  refund payments, return receipts for restocked items
 * Sales > Configuration > Shopify: store connection (Admin GraphQL API), locations,
   sales channels, metafield mapping and the sync log
 """,
-    "version": "19.0.1.8.0",
+    "version": "19.0.1.9.0",
     "category": "Sales/Sales",
     "author": "Codecrafters",
     "license": "LGPL-3",

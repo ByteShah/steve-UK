@@ -598,3 +598,168 @@ class TestShopifyOrders(ShopifyPublishCase):
         self.run_import(self.order_node())
         self.assertFalse(self.ship(self.find()).shopify_fulfillment_state, "Switched off on the store.")
         self.send()
+
+    # ------------------------------------------------------------------
+    # Task 3.5: cancellations, refunds and returns
+    # ------------------------------------------------------------------
+    @staticmethod
+    def refund(n, items=(), money=0.0, shipping=0.0, when="2026-11-03T12:00:00Z", note=None):
+        """A Shopify refund. items: (line item gid, quantity, restock type)."""
+        return {
+            "id": f"gid://shopify/Refund/{n}", "createdAt": when, "note": note,
+            "totalRefundedSet": {"shopMoney": {"amount": f"{money:.2f}"}},
+            "refundLineItems": {"nodes": [{"quantity": qty, "restockType": restock, "location": None,
+                                           "lineItem": {"id": line}} for line, qty, restock in items]},
+            "refundShippingLines": {"nodes": [{"subtotalAmountSet": {"shopMoney": {"amount": f"{shipping:.2f}"}},
+                                               "taxAmountSet": {"shopMoney": {"amount": "0.00"}}}] if shipping else []},
+            "transactions": {"nodes": [{"id": f"gid://shopify/OrderTransaction/9{n}", "kind": "REFUND",
+                                        "status": "SUCCESS", "gateway": "manual", "processedAt": when,
+                                        "amountSet": {"shopMoney": {"amount": f"{money:.2f}"}}}] if money else []},
+        }
+
+    @staticmethod
+    def refunds_page(*refunds):
+        return gql({"order": {"refunds": list(refunds)}})
+
+    def paid_order(self, number=1001, qty=1):
+        self.invoicing_on()
+        self.store.write({"process_refunds": True, "refunds_from": datetime(2026, 11, 1)})
+        node = self.order_node(number, items=[(NATURAL_GID, "SN-CDB-NAT", qty, 195.0, 0.0)])
+        node["transactions"] = [self.tx(number, _total(node))]
+        self.run_import(node)
+        order = self.find(number)
+        self.assertEqual(order.invoice_ids.payment_state in ("paid", "in_payment"), True)
+        return order, node
+
+    def refunded(self, node, total_refunded, *refunds, status="PARTIALLY_REFUNDED", **changes):
+        """Import the order again after refunds in Shopify."""
+        node = dict(node, displayFinancialStatus=status, updatedAt="2026-11-03T12:05:00Z",
+                    totalRefundedSet={"shopMoney": {"amount": f"{total_refunded:.2f}"}}, **changes)
+        responses = [self.page(node)] + ([self.refunds_page(*refunds)] if refunds else [])
+        self.run_shopify(self.store._import_orders, *responses)
+        return node
+
+    @staticmethod
+    def credit_notes(order):
+        return order.invoice_ids.filtered(lambda m: m.move_type == "out_refund")
+
+    def test_cancelled_before_shipping(self):
+        order, node = self.paid_order()
+        line = "gid://shopify/LineItem/10011"
+        node = self.refunded(node, 199.95, self.refund(1, [(line, 1, "CANCEL")], money=199.95, shipping=4.95),
+                             status="REFUNDED", cancelledAt="2026-11-03T12:00:00Z", cancelReason="CUSTOMER")
+        self.assertEqual(order.state, "cancel", "Nothing shipped: the order is cancelled.")
+        self.assertEqual(set(order.picking_ids.mapped("state")), {"cancel"}, "The delivery is cancelled: stock free.")
+        credit = self.credit_notes(order)
+        self.assertEqual((len(credit), credit.state), (1, "posted"))
+        self.assertAlmostEqual(credit.amount_total, 199.95)
+        self.assertEqual(credit.reversed_entry_id, order.invoice_ids.filtered(lambda m: m.move_type == "out_invoice"))
+        self.assertEqual(str(credit.invoice_date), "2026-11-03")
+        self.assertIn(credit.payment_state, ("paid", "in_payment"))
+        payment = self.env["account.payment"].search([("shopify_transaction_id", "=", "gid://shopify/OrderTransaction/91")])
+        self.assertEqual((payment.payment_type, payment.amount, payment.journal_id.code), ("outbound", 199.95, "SHOP"))
+        self.assertEqual(payment.memo, "#1001 refund manual")
+        refund = order.shopify_refund_ids
+        self.assertEqual((refund.state, refund.credit_note_id, refund.amount), ("done", credit, 199.95))
+        self.assertIn("Cancelled in Shopify (customer)", " ".join(order.message_ids.mapped("body")))
+        self.assertFalse(order.shopify_import_issue)
+        # The same order again: everything already recorded, no call for refunds.
+        self.run_shopify(self.store._import_orders, self.page(node))
+        self.assertEqual(len(self.credit_notes(order)), 1)
+
+    def test_items_refunded_before_shipping(self):
+        order, node = self.paid_order(qty=3)
+        self.refunded(node, 195.0, self.refund(1, [("gid://shopify/LineItem/10011", 1, "CANCEL")], money=195.0))
+        line = order.order_line.filtered(lambda l: l.product_id == self.natural)
+        self.assertEqual(order.state, "sale")
+        self.assertEqual(line.product_uom_qty, 2, "The refunded bowl is taken off the order.")
+        delivery = order.picking_ids.filtered(lambda p: p.state not in ("done", "cancel"))
+        self.assertEqual(delivery.picking_type_code, "outgoing", "No receipt is planned for the refunded item.")
+        self.assertEqual(sum(delivery.move_ids.mapped("product_uom_qty")), 2, "The delivery shrinks to 2.")
+        credit = self.credit_notes(order)
+        self.assertAlmostEqual(credit.amount_total, 195.0)
+        self.assertEqual(credit.invoice_line_ids.sale_line_ids, line)
+        self.assertEqual((line.qty_invoiced, line.qty_to_invoice), (2, 0), "Nothing left to invoice.")
+        self.assertIn("Taken off the order before shipping: 1 ×", order.shopify_refund_ids.result)
+
+    def test_shipped_item_returned(self):
+        order, node = self.paid_order(qty=2)
+        self.ship(order)
+        self.refunded(node, 195.0, self.refund(1, [("gid://shopify/LineItem/10011", 1, "RETURN")], money=195.0))
+        refund = order.shopify_refund_ids
+        back = refund.return_ids
+        self.assertEqual(len(back), 1)
+        self.assertEqual((back.picking_type_code, back.state), ("incoming", "assigned"),
+                         "Return receipt waits for the warehouse.")
+        self.assertEqual(back.move_ids.product_uom_qty, 1)
+        self.assertEqual(back.location_dest_id, self.warehouse.lot_stock_id)
+        self.assertEqual(back.origin, "#1001 refund")
+        self.assertFalse(back.shopify_fulfillment_state, "A return is never sent as a fulfilment.")
+        self.assertAlmostEqual(self.credit_notes(order).amount_total, 195.0)
+        line = order.order_line.filtered(lambda l: l.product_id == self.natural)
+        self.assertEqual(line.product_uom_qty, 2, "A shipped item is returned, not taken off.")
+        back.button_validate()
+        self.assertEqual(line.qty_delivered, 1, "Validated return: delivered quantity goes down.")
+
+    def test_shipped_item_not_coming_back_and_amount_refunds(self):
+        order, node = self.paid_order()
+        self.ship(order)
+        node = self.refunded(node, 195.0, self.refund(1, [("gid://shopify/LineItem/10011", 1, "NO_RESTOCK")],
+                                                      money=175.0))
+        refund = order.shopify_refund_ids
+        self.assertFalse(refund.return_ids, "Not restocked: no return.")
+        credit = self.credit_notes(order)
+        self.assertAlmostEqual(credit.amount_total, 175.0, msg="The credit note equals the money paid back.")
+        adjustment = credit.invoice_line_ids.filtered(
+            lambda l: l.product_id == self.env.ref("js_shopify_connector.product_shopify_refund_adjustment"))
+        self.assertAlmostEqual(adjustment.price_total, -20.0)
+        self.assertEqual(adjustment.tax_ids, self.vat_incl, "Same VAT as the goods.")
+
+        # Then shipping only, then a goodwill amount: one credit note each.
+        node = self.refunded(node, 199.95, self.refund(2, money=4.95, shipping=4.95),
+                             self.refund(1, [("gid://shopify/LineItem/10011", 1, "NO_RESTOCK")], money=175.0))
+        self.assertEqual(len(order.shopify_refund_ids), 2, "Refund 1 is not processed twice.")
+        shipping = self.credit_notes(order).filtered(lambda m: m.shopify_refund_id == "gid://shopify/Refund/2")
+        self.assertEqual(shipping.invoice_line_ids.product_id, self.store.order_shipping_product_id)
+        self.assertAlmostEqual(shipping.amount_total, 4.95)
+
+    def test_cancelled_after_part_shipped(self):
+        order, node = self.paid_order(qty=2)
+        self.ship(order, quantity=1)
+        self.refunded(node, 195.0, self.refund(1, [("gid://shopify/LineItem/10011", 1, "CANCEL")], money=195.0),
+                      cancelledAt="2026-11-03T12:00:00Z")
+        self.assertEqual(order.state, "sale", "Part shipped: not cancelled automatically.")
+        self.assertFalse(order.picking_ids.filtered(lambda p: p.state not in ("done", "cancel")),
+                         "The delivery not shipped yet is cancelled.")
+        self.assertIn("after part of it was shipped", order.shopify_import_issue)
+        self.assertTrue(order.activity_ids)
+        self.assertAlmostEqual(self.credit_notes(order).amount_total, 195.0)
+
+    def test_authorised_order_cancelled(self):
+        self.store.write({"process_refunds": True, "refunds_from": datetime(2026, 11, 1)})
+        node = self.order_node(status="AUTHORIZED")
+        self.run_import(node)
+        order = self.find()
+        self.assertEqual(order.state, "sale")
+        self.run_import(dict(node, displayFinancialStatus="VOIDED", cancelledAt="2026-11-03T12:00:00Z",
+                             updatedAt="2026-11-03T12:05:00Z"))
+        self.assertEqual(order.state, "cancel", "No money taken, nothing shipped: cancelled, no refunds call.")
+        self.assertFalse(order.invoice_ids)
+
+    def test_old_refunds_and_switched_off(self):
+        order, node = self.paid_order()
+        self.store.refunds_from = datetime(2026, 11, 3, 13, 0)
+        self.refunded(node, 50.0, self.refund(1, money=50.0))
+        self.assertEqual(order.shopify_refund_ids.state, "skipped")
+        self.assertFalse(self.credit_notes(order), "Made before Refunds From: not processed.")
+
+        self.store.process_refunds = False
+        self.run_import(dict(node, cancelledAt="2026-11-03T12:00:00Z", updatedAt="2026-11-03T12:10:00Z"))
+        self.assertEqual(order.state, "sale")
+        self.assertIn("Cancel the delivery and order here", order.shopify_import_issue, "Off: a person does it.")
+        self.store.process_refunds = True
+        self.assertGreater(self.store.refunds_from, datetime(2026, 11, 3, 13, 0))
+
+
+def _total(node):
+    return float(node["totalPriceSet"]["shopMoney"]["amount"])

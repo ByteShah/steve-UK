@@ -33,6 +33,20 @@
                             <field name="shopify_order_id" groups="base.group_no_one"/>
                         </group>
                     </group>
+                    <separator string="Refunds" invisible="not shopify_refund_ids"/>
+                    <field name="shopify_refund_ids" nolabel="1" invisible="not shopify_refund_ids">
+                        <list create="0" delete="0" decoration-muted="state == 'skipped'">
+                            <field name="refund_date"/>
+                            <field name="amount"/>
+                            <field name="currency_id" column_invisible="1"/>
+                            <field name="credit_note_id"/>
+                            <field name="return_ids" widget="many2many_tags"/>
+                            <field name="state" widget="badge" decoration-success="state == 'done'"/>
+                            <field name="result"/>
+                            <field name="note" optional="hide"/>
+                            <field name="shopify_refund_id" groups="base.group_no_one" optional="hide"/>
+                        </list>
+                    </field>
                 </page>
             </xpath>
         </field>

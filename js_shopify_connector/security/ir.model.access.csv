@@ -10,3 +10,5 @@ access_shopify_sync_log_manager,shopify.sync.log manager,model_shopify_sync_log,
 access_shopify_media_manager,shopify.media manager,model_shopify_media,group_shopify_manager,1,1,1,1
 access_shopify_shipping_map_user,shopify.shipping.map user,model_shopify_shipping_map,base.group_user,1,0,0,0
 access_shopify_shipping_map_manager,shopify.shipping.map manager,model_shopify_shipping_map,group_shopify_manager,1,1,1,1
+access_shopify_refund_user,shopify.refund user,model_shopify_refund,base.group_user,1,0,0,0
+access_shopify_refund_manager,shopify.refund manager,model_shopify_refund,group_shopify_manager,1,1,1,1

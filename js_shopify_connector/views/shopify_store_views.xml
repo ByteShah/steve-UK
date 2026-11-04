@@ -67,7 +67,9 @@
                         The Shopify app needs these Admin API access scopes:
                         read_products, write_products, read_inventory, write_inventory, read_locations,
                         read_publications, write_publications, read_files, write_files, and read_orders
-                        to import orders (with access to customer names, emails, phones and addresses).
+                        to import orders (with access to customer names, emails, phones and addresses), and
+                        read_merchant_managed_fulfillment_orders, write_merchant_managed_fulfillment_orders
+                        to send fulfilments and tracking.
                     </div>
                     <notebook>
                         <page string="Locations" name="locations">
@@ -114,6 +116,11 @@
                                                 help="Invoice paid orders that were confirmed before Invoice Orders From."/>
                                     </div>
                                 </group>
+                                <group string="Fulfilments">
+                                    <field name="send_fulfillments" widget="boolean_toggle"/>
+                                    <field name="notify_customer_on_shipment" widget="boolean_toggle"
+                                           invisible="not send_fulfillments"/>
+                                </group>
                             </group>
                             <separator string="Shipping Methods"/>
                             <div class="text-muted small mb-2">
@@ -132,7 +139,8 @@
                                 quotations until Shopify reports them paid. Orders with an unknown SKU or a total
                                 that does not match are kept as quotations marked Needs Attention.
                                 Once Shopify has taken the money, the order is invoiced and the payment recorded
-                                in the Payments Journal.
+                                in the Payments Journal. When its delivery is validated, the items are marked
+                                fulfilled in Shopify with the tracking number.
                             </div>
                         </page>
                         <page string="Sales Channels" name="publications">

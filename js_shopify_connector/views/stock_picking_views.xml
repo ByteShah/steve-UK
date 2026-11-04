@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_picking_form_shopify" model="ir.ui.view">
+        <field name="name">stock.picking.form.shopify</field>
+        <field name="model">stock.picking</field>
+        <field name="inherit_id" ref="stock_delivery.view_picking_withcarrier_out_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//header" position="inside">
+                <button name="action_shopify_send_fulfillment" type="object" string="Send to Shopify"
+                        invisible="shopify_fulfillment_state not in ('to_send', 'failed')"
+                        groups="stock.group_stock_user"/>
+            </xpath>
+            <xpath expr="//header" position="after">
+                <div class="alert alert-danger mb-0" role="alert" invisible="shopify_fulfillment_state != 'failed'">
+                    <b>Not sent to Shopify:</b> <field name="shopify_fulfillment_error" class="d-inline"/>
+                    <div class="small">Odoo tries again every 5 minutes, or click Send to Shopify.</div>
+                </div>
+            </xpath>
+            <xpath expr="//div[@name='tracking']" position="after">
+                <field name="shopify_fulfillment_state" widget="badge" invisible="not shopify_fulfillment_state"
+                       decoration-success="shopify_fulfillment_state == 'sent'"
+                       decoration-info="shopify_fulfillment_state in ('to_send', 'nothing')"
+                       decoration-danger="shopify_fulfillment_state == 'failed'"/>
+                <field name="shopify_fulfillment_error" string="Shopify Note"
+                       invisible="shopify_fulfillment_state != 'nothing'"/>
+                <field name="shopify_fulfillment_id" invisible="not shopify_fulfillment_id" groups="base.group_no_one"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="vpicktree_shopify" model="ir.ui.view">
+        <field name="name">stock.picking.list.shopify</field>
+        <field name="model">stock.picking</field>
+        <field name="inherit_id" ref="stock.vpicktree"/>
+        <field name="arch" type="xml">
+            <field name="state" position="before">
+                <field name="shopify_fulfillment_state" widget="badge" optional="show"
+                       decoration-success="shopify_fulfillment_state == 'sent'"
+                       decoration-info="shopify_fulfillment_state in ('to_send', 'nothing')"
+                       decoration-danger="shopify_fulfillment_state == 'failed'"/>
+            </field>
+        </field>
+    </record>
+
+    <record id="view_picking_internal_search_shopify" model="ir.ui.view">
+        <field name="name">stock.picking.search.shopify</field>
+        <field name="model">stock.picking</field>
+        <field name="inherit_id" ref="stock.view_picking_internal_search"/>
+        <field name="arch" type="xml">
+            <filter name="backorder" position="after">
+                <filter name="shopify_not_sent" string="Shopify not sent"
+                        domain="[('shopify_fulfillment_state', 'in', ('to_send', 'failed'))]"/>
+            </filter>
+        </field>
+    </record>
+
+    <record id="view_delivery_carrier_form_shopify" model="ir.ui.view">
+        <field name="name">delivery.carrier.form.shopify</field>
+        <field name="model">delivery.carrier</field>
+        <field name="inherit_id" ref="delivery.view_delivery_carrier_form"/>
+        <field name="arch" type="xml">
+            <field name="tracking_url" position="after">
+                <field name="shopify_carrier_name" placeholder="e.g. Royal Mail"/>
+            </field>
+        </field>
+    </record>
+</odoo>

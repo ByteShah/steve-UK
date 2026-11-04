@@ -17,10 +17,12 @@ Product data sent to Shopify, kept on Odoo products.
   matched or created, lines matched by variant ID then SKU at the prices charged, discounts
   and shipping lines; paid orders confirmed, pending ones kept as quotations, anything that
   does not match held back as "Needs attention"
+* Paid orders invoiced and their Shopify payments registered; shipping rates mapped to delivery methods
+* Validated deliveries sent back as Shopify fulfilments with tracking (partial deliveries too)
 * Sales > Configuration > Shopify: store connection (Admin GraphQL API), locations,
   sales channels, metafield mapping and the sync log
 """,
-    "version": "19.0.1.7.0",
+    "version": "19.0.1.8.0",
     "category": "Sales/Sales",
     "author": "Codecrafters",
     "license": "LGPL-3",
@@ -41,6 +43,7 @@ Product data sent to Shopify, kept on Odoo products.
         "views/sale_order_views.xml",
         "views/res_partner_views.xml",
         "views/account_payment_views.xml",
+        "views/stock_picking_views.xml",
     ],
     "installable": True,
 }

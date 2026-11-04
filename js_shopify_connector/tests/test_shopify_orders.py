@@ -439,3 +439,162 @@ class TestShopifyOrders(ShopifyPublishCase):
         self.assertEqual(order.state, "sale")
         self.assertEqual(order.picking_ids.carrier_id, carrier, "The delivery order knows the method.")
         self.assertEqual(len(Map.search([("store_id", "=", self.store.id)])), 1)
+
+    # ------------------------------------------------------------------
+    # Task 3.4: fulfilments and tracking back to Shopify
+    # ------------------------------------------------------------------
+    @staticmethod
+    def fo(n, items, location=1, status="OPEN"):
+        """A Shopify fulfilment order. items: (line item gid, remaining quantity)."""
+        return {"id": f"gid://shopify/FulfillmentOrder/{n}", "status": status,
+                "assignedLocation": {"location": {"id": f"gid://shopify/Location/{location}"}},
+                "lineItems": {"nodes": [
+                    {"id": f"gid://shopify/FulfillmentOrderLineItem/{n}{k}", "remainingQuantity": qty,
+                     "lineItem": {"id": line}} for k, (line, qty) in enumerate(items, start=1)]}}
+
+    @staticmethod
+    def fo_page(*fulfillment_orders):
+        return gql({"order": {"fulfillmentOrders": {"nodes": list(fulfillment_orders)}}})
+
+    @staticmethod
+    def created(n=1):
+        return gql({"fulfillmentCreate": {"fulfillment": {"id": f"gid://shopify/Fulfillment/{n}", "status": "SUCCESS"},
+                                          "userErrors": []}})
+
+    def royal_mail(self):
+        product = self.env["product.product"].create({"name": "Royal Mail 24", "type": "service"})
+        return self.env["delivery.carrier"].create({
+            "name": "RM Tracked 24", "product_id": product.id, "delivery_type": "fixed",
+            "shopify_carrier_name": "Royal Mail",
+            "tracking_url": "https://www.royalmail.com/track-your-item#/tracking-results/<shipmenttrackingnumber>"})
+
+    def ship(self, order, quantity=None, tracking=None, carrier=None):
+        """Validate the open delivery of an order; a smaller quantity leaves a backorder."""
+        picking = order.picking_ids.filtered(lambda p: p.state not in ("done", "cancel"))
+        self.assertEqual(len(picking), 1)
+        picking.write({"carrier_tracking_ref": tracking, **({"carrier_id": carrier.id} if carrier else {})})
+        for move in picking.move_ids:
+            move.quantity = move.product_uom_qty if quantity is None else quantity
+            move.picked = True
+        picking.with_context(skip_backorder=True).button_validate()
+        self.assertEqual(picking.state, "done")
+        return picking
+
+    def send(self, *responses):
+        return self.run_shopify(self.store._send_pending_fulfillments, *responses)
+
+    def test_delivery_sent_with_tracking(self):
+        self.run_import(self.order_node())
+        order = self.find()
+        picking = self.ship(order, tracking="RM123456785GB", carrier=self.royal_mail())
+        self.assertEqual(picking.shopify_fulfillment_state, "to_send", "Validation never waits for Shopify.")
+        cron = self.env.ref("js_shopify_connector.ir_cron_shopify_send_fulfillments")
+        self.assertTrue(self.env["ir.cron.trigger"].search([("cron_id", "=", cron.id)]),
+                        "Validation asks the cron to send straight away.")
+
+        _result, calls = self.send(self.fo_page(self.fo(1, [("gid://shopify/LineItem/10011", 1)])), self.created())
+        self.assertEqual(self.body(calls[0])["variables"], {"id": "gid://shopify/Order/1001"})
+        sent = self.body(calls[1])["variables"]
+        self.assertEqual(sent["fulfillment"], {
+            "lineItemsByFulfillmentOrder": [{"fulfillmentOrderId": "gid://shopify/FulfillmentOrder/1",
+                                             "fulfillmentOrderLineItems": [
+                                                 {"id": "gid://shopify/FulfillmentOrderLineItem/11", "quantity": 1}]}],
+            "notifyCustomer": True,
+            "trackingInfo": {"number": "RM123456785GB", "company": "Royal Mail",
+                             "url": "https://www.royalmail.com/track-your-item#/tracking-results/RM123456785GB"}})
+        self.assertEqual(sent["message"], picking.name)
+        self.assertEqual((picking.shopify_fulfillment_state, picking.shopify_fulfillment_id),
+                         ("sent", "gid://shopify/Fulfillment/1"))
+        self.assertIn("Fulfilled in Shopify: 1 ×", picking.message_ids[0].body)
+        self.assertIn("Royal Mail RM123456785GB", order.message_ids[0].body)
+        # Nothing left to send: the next run makes no call.
+        self.send()
+
+    def test_partial_delivery_then_backorder(self):
+        self.run_import(self.order_node(items=[(NATURAL_GID, "SN-CDB-NAT", 3, 195.0, 0.0)]))
+        order = self.find()
+        first = self.ship(order, quantity=2, tracking="RM1")
+        line = "gid://shopify/LineItem/10011"
+        _result, calls = self.send(self.fo_page(self.fo(1, [(line, 3)])), self.created(1))
+        items = self.body(calls[1])["variables"]["fulfillment"]["lineItemsByFulfillmentOrder"]
+        self.assertEqual(items[0]["fulfillmentOrderLineItems"][0]["quantity"], 2, "Only what left.")
+        self.assertNotIn("company", self.body(calls[1])["variables"]["fulfillment"]["trackingInfo"],
+                         "No delivery method: Shopify guesses the carrier from the number.")
+
+        second = self.ship(order, tracking="RM2")
+        self.assertNotEqual(first, second, "The rest went on a backorder.")
+        _result, calls = self.send(self.fo_page(self.fo(1, [(line, 1)])), self.created(2))
+        items = self.body(calls[1])["variables"]["fulfillment"]["lineItemsByFulfillmentOrder"]
+        self.assertEqual(items[0]["fulfillmentOrderLineItems"][0]["quantity"], 1)
+        self.assertEqual((first | second).mapped("shopify_fulfillment_id"),
+                         ["gid://shopify/Fulfillment/1", "gid://shopify/Fulfillment/2"])
+
+    def test_fulfilment_order_moved_to_the_warehouse_location(self):
+        self.run_import(self.order_node())
+        self.ship(self.find())
+        line = "gid://shopify/LineItem/10011"
+        moved = gql({"fulfillmentOrderMove": {"movedFulfillmentOrder": self.fo(2, [(line, 1)]), "userErrors": []}})
+        _result, calls = self.send(self.fo_page(self.fo(1, [(line, 1)], location=9)), moved, self.created())
+        self.assertEqual(self.body(calls[1])["variables"],
+                         {"id": "gid://shopify/FulfillmentOrder/1", "newLocationId": "gid://shopify/Location/1"})
+        sent = self.body(calls[2])["variables"]["fulfillment"]
+        self.assertEqual(sent["lineItemsByFulfillmentOrder"][0]["fulfillmentOrderId"],
+                         "gid://shopify/FulfillmentOrder/2", "Fulfilled from the moved fulfilment order.")
+        self.assertNotIn("trackingInfo", sent, "No tracking number: fulfilled without tracking.")
+
+    def test_tracking_added_after_sending(self):
+        self.store.notify_customer_on_shipment = False
+        self.run_import(self.order_node())
+        picking = self.ship(self.find(), carrier=self.royal_mail())
+        _result, calls = self.send(self.fo_page(self.fo(1, [("gid://shopify/LineItem/10011", 1)])), self.created())
+        self.assertFalse(self.body(calls[1])["variables"]["fulfillment"]["notifyCustomer"])
+
+        picking.carrier_tracking_ref = "RM999"
+        self.assertEqual(picking.shopify_fulfillment_state, "to_send")
+        updated = gql({"fulfillmentTrackingInfoUpdate": {"fulfillment": {"id": "gid://shopify/Fulfillment/1"},
+                                                         "userErrors": []}})
+        _result, calls = self.send(updated)
+        variables = self.body(calls[0])["variables"]
+        self.assertEqual(variables["fulfillmentId"], "gid://shopify/Fulfillment/1")
+        self.assertEqual(variables["trackingInfoInput"]["number"], "RM999")
+        self.assertEqual((picking.shopify_fulfillment_state, picking.shopify_tracking_sent), ("sent", "RM999"))
+        self.assertIn("Tracking updated in Shopify: Royal Mail RM999", picking.message_ids[0].body)
+
+    def test_failure_is_shown_and_retried(self):
+        self.run_import(self.order_node())
+        picking = self.ship(self.find())
+        denied = FakeResponse({"errors": [{"message": "Access denied for fulfillmentOrders field."}]})
+        self.send(denied)
+        self.assertEqual(picking.shopify_fulfillment_state, "failed")
+        self.assertIn("no fulfilment permission", picking.shopify_fulfillment_error)
+        log = self.env["shopify.sync.log"].search([("operation", "=", "send_fulfillment")], limit=1)
+        self.assertEqual((log.state, log.sale_order_id), ("error", picking.sale_id), "The failure stays in the log.")
+
+        action, _calls = self.run_shopify(
+            picking.action_shopify_send_fulfillment,
+            self.fo_page(self.fo(1, [("gid://shopify/LineItem/10011", 1)])), self.created())
+        self.assertEqual(action["params"]["type"], "success")
+        self.assertEqual((picking.shopify_fulfillment_state, picking.shopify_fulfillment_error), ("sent", False))
+
+    def test_already_fulfilled_or_on_hold_in_shopify(self):
+        self.run_import(self.order_node(), self.order_node(1002))
+        done_by_hand = self.ship(self.find())
+        on_hold = self.ship(self.find(1002))
+        self.send(self.fo_page(self.fo(1, [("gid://shopify/LineItem/10011", 0)], status="CLOSED")),
+                  self.fo_page(self.fo(2, [("gid://shopify/LineItem/10021", 1)], status="ON_HOLD")))
+        self.assertEqual(done_by_hand.shopify_fulfillment_state, "nothing")
+        self.assertIn("Already fulfilled in Shopify", done_by_hand.shopify_fulfillment_error)
+        self.assertEqual(on_hold.shopify_fulfillment_state, "failed")
+        self.assertIn("on hold in Shopify", on_hold.shopify_fulfillment_error)
+
+    def test_only_shopify_deliveries_are_sent(self):
+        manual = self.env["sale.order"].create({
+            "partner_id": self.env["res.partner"].create({"name": "Shop Customer"}).id,
+            "order_line": [(0, 0, {"product_id": self.natural.id, "product_uom_qty": 1})]})
+        manual.action_confirm()
+        self.assertFalse(self.ship(manual).shopify_fulfillment_state, "Not a Shopify order.")
+
+        self.store.send_fulfillments = False
+        self.run_import(self.order_node())
+        self.assertFalse(self.ship(self.find()).shopify_fulfillment_state, "Switched off on the store.")
+        self.send()

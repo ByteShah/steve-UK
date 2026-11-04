@@ -20,7 +20,7 @@ Product data sent to Shopify, kept on Odoo products.
 * Sales > Configuration > Shopify: store connection (Admin GraphQL API), locations,
   sales channels, metafield mapping and the sync log
 """,
-    "version": "19.0.1.6.1",
+    "version": "19.0.1.7.0",
     "category": "Sales/Sales",
     "author": "Codecrafters",
     "license": "LGPL-3",
@@ -40,6 +40,7 @@ Product data sent to Shopify, kept on Odoo products.
         "data/shopify_order_data.xml",
         "views/sale_order_views.xml",
         "views/res_partner_views.xml",
+        "views/account_payment_views.xml",
     ],
     "installable": True,
 }

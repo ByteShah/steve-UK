@@ -332,3 +332,110 @@ class TestShopifyOrders(ShopifyPublishCase):
         self.assertEqual(order.partner_shipping_id, customer, "A shipped order is not changed.")
         self.assertIn("after the order was shipped", order.shopify_import_issue)
         self.assertTrue(order.activity_ids)
+
+    # ------------------------------------------------------------------
+    # Task 3.3: shipping methods, invoices and payments
+    # ------------------------------------------------------------------
+    @staticmethod
+    def tx(n, amount, kind="SALE", status="SUCCESS", when="2026-11-03T09:01:00Z", gateway="shopify_payments"):
+        return {"id": f"gid://shopify/OrderTransaction/{n}", "kind": kind, "status": status, "gateway": gateway,
+                "processedAt": when, "amountSet": {"shopMoney": {"amount": f"{amount:.2f}"}}}
+
+    def invoicing_on(self):
+        self.store.write({"create_invoices": True, "invoices_from": datetime(2026, 11, 1)})
+
+    def payments(self, order):
+        return self.env["account.payment"].search([("shopify_transaction_id", "!=", False),
+                                                   ("memo", "like", order.shopify_order_name)])
+
+    def test_paid_order_invoiced_and_paid(self):
+        self.invoicing_on()
+        node = self.order_node(transactions=[self.tx(1, 199.95)])
+        self.run_import(node)
+        order = self.find()
+        invoice = order.invoice_ids
+        self.assertEqual((len(invoice), invoice.state), (1, "posted"))
+        self.assertAlmostEqual(invoice.amount_total, 199.95)
+        self.assertEqual(str(invoice.invoice_date), "2026-11-03", "Invoice dated when Shopify took the money.")
+        self.assertIn(invoice.payment_state, ("paid", "in_payment"))
+        payment = self.payments(order)
+        self.assertEqual(payment.journal_id.code, "SHOP")
+        self.assertEqual(payment.journal_id, self.store.payment_journal_id, "Shopify Payments created and kept.")
+        self.assertEqual((payment.amount, payment.memo), (199.95, "#1001 shopify_payments"))
+        self.assertEqual(payment.shopify_transaction_id, "gid://shopify/OrderTransaction/1")
+
+        self.run_import(self.order_node(transactions=[self.tx(1, 199.95)], displayFulfillmentStatus="FULFILLED"))
+        self.assertEqual(len(order.invoice_ids), 1, "Never invoiced twice.")
+        self.assertEqual(len(self.payments(order)), 1, "Never paid twice.")
+
+    def test_authorised_waits_for_capture(self):
+        self.invoicing_on()
+        auth = self.tx(1, 199.95, kind="AUTHORIZATION")
+        self.run_import(self.order_node(status="AUTHORIZED", transactions=[auth]))
+        order = self.find()
+        self.assertEqual(order.state, "sale")
+        self.assertFalse(order.invoice_ids, "Nothing taken yet: no invoice.")
+        self.run_import(self.order_node(transactions=[auth, self.tx(2, 199.95, kind="CAPTURE",
+                                                                     when="2026-11-05T10:00:00Z")]))
+        self.assertEqual(str(order.invoice_ids.invoice_date), "2026-11-05")
+        self.assertIn(order.invoice_ids.payment_state, ("paid", "in_payment"))
+        self.assertEqual(self.payments(order).shopify_transaction_id, "gid://shopify/OrderTransaction/2")
+
+    def test_partly_paid_then_paid(self):
+        self.invoicing_on()
+        first = self.tx(1, 50.0)
+        self.run_import(self.order_node(status="PARTIALLY_PAID", transactions=[first]))
+        order = self.find()
+        self.assertEqual(order.invoice_ids.payment_state, "partial")
+        self.assertAlmostEqual(order.invoice_ids.amount_residual, 149.95)
+        self.run_import(self.order_node(transactions=[first, self.tx(2, 149.95, gateway="gift_card")]))
+        self.assertIn(order.invoice_ids.payment_state, ("paid", "in_payment"))
+        self.assertEqual(len(self.payments(order)), 2)
+        self.assertEqual(len(order.invoice_ids), 1)
+
+    def test_failed_transaction_is_ignored(self):
+        self.invoicing_on()
+        self.run_import(self.order_node(status="PENDING", transactions=[self.tx(1, 199.95, status="FAILURE")]))
+        self.assertFalse(self.find().invoice_ids)
+
+    def test_orders_before_invoicing_need_the_button(self):
+        self.store.write({"create_invoices": True, "invoices_from": datetime(2026, 11, 4)})
+        node = self.order_node(transactions=[self.tx(1, 199.95)])
+        self.run_import(node)
+        order = self.find()
+        self.assertFalse(order.invoice_ids, "Orders placed before Invoice Orders From are left alone.")
+        self.run_shopify(self.store.action_invoice_paid_orders, gql({"order": node}))
+        self.assertEqual(order.invoice_ids.state, "posted")
+        self.assertIn(order.invoice_ids.payment_state, ("paid", "in_payment"))
+
+    def test_invoicing_off(self):
+        self.store.write({"create_invoices": False, "invoices_from": datetime(2026, 11, 1)})
+        self.run_import(self.order_node(transactions=[self.tx(1, 199.95)]))
+        self.assertFalse(self.find().invoice_ids)
+        self.store.create_invoices = True
+        self.assertGreater(self.store.invoices_from, datetime(2026, 11, 3, 9, 0),
+                           "Switching on starts now: orders from the off period need the button.")
+
+    def test_shipping_rate_mapped_to_delivery_method(self):
+        Map = self.env["shopify.shipping.map"]
+        self.run_import(self.order_node())
+        first = self.find()
+        rate = Map.search([("store_id", "=", self.store.id), ("name", "=", "Standard")])
+        self.assertEqual(len(rate), 1, "An unknown rate is added to the list.")
+        self.assertFalse(first.carrier_id)
+        self.assertEqual(first.order_line.filtered("is_delivery").product_id, self.store.order_shipping_product_id)
+
+        product = self.env["product.product"].create({"name": "Royal Mail 48", "type": "service",
+                                                      "taxes_id": [(6, 0, self.vat_incl.ids)]})
+        carrier = self.env["delivery.carrier"].create({"name": "Royal Mail 48", "product_id": product.id,
+                                                       "delivery_type": "fixed", "fixed_price": 9.99})
+        rate.carrier_id = carrier
+        self.run_import(self.order_node(1002))
+        order = self.find(1002)
+        line = order.order_line.filtered("is_delivery")
+        self.assertEqual(order.carrier_id, carrier)
+        self.assertEqual((line.product_id, line.price_unit, line.name), (product, 4.95, "Standard"),
+                         "Shopify's price and name; Odoo never re-prices shipping.")
+        self.assertEqual(order.state, "sale")
+        self.assertEqual(order.picking_ids.carrier_id, carrier, "The delivery order knows the method.")
+        self.assertEqual(len(Map.search([("store_id", "=", self.store.id)])), 1)

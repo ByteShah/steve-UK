@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_account_payment_form_shopify" model="ir.ui.view">
+        <field name="name">account.payment.form.shopify</field>
+        <field name="model">account.payment</field>
+        <field name="inherit_id" ref="account.view_account_payment_form"/>
+        <field name="arch" type="xml">
+            <field name="memo" position="after">
+                <field name="shopify_transaction_id" invisible="not shopify_transaction_id"/>
+            </field>
+        </field>
+    </record>
+</odoo>

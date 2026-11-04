@@ -8,3 +8,5 @@ access_shopify_metafield_map_user,shopify.metafield.map user,model_shopify_metaf
 access_shopify_metafield_map_manager,shopify.metafield.map manager,model_shopify_metafield_map,group_shopify_manager,1,1,1,1
 access_shopify_sync_log_manager,shopify.sync.log manager,model_shopify_sync_log,group_shopify_manager,1,1,1,1
 access_shopify_media_manager,shopify.media manager,model_shopify_media,group_shopify_manager,1,1,1,1
+access_shopify_shipping_map_user,shopify.shipping.map user,model_shopify_shipping_map,base.group_user,1,0,0,0
+access_shopify_shipping_map_manager,shopify.shipping.map manager,model_shopify_shipping_map,group_shopify_manager,1,1,1,1

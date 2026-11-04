@@ -14,3 +14,4 @@ from . import res_partner
 from . import sale_order
 from . import shopify_order_import
 from . import shopify_order_customer
+from . import shopify_order_payment

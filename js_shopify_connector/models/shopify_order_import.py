@@ -27,6 +27,7 @@ ORDER_FIELDS = """
       discountAllocations { allocatedAmountSet { shopMoney { amount } } } }
     pageInfo { hasNextPage }
   }
+  transactions(first: 50) { id kind status gateway processedAt amountSet { shopMoney { amount } } }
   shippingLines(first: 10) {
     nodes { title code originalPriceSet { shopMoney { amount } }
       discountAllocations { allocatedAmountSet { shopMoney { amount } } } }
@@ -187,13 +188,16 @@ class ShopifyStore(models.Model):
     def _shopify_import_order_by_id(self, shopify_order_id):
         """Fetch one order and rebuild its quotation. Returns the sales order."""
         self.ensure_one()
-        try:
-            node = self._call("import_orders", ORDER_QUERY, {"id": shopify_order_id})["order"]
-        except ShopifyError as error:
-            raise UserError(_("Shopify could not be read: %s", error)) from error
+        node = self._shopify_fetch_order(shopify_order_id)
         if not node:
             raise UserError(_("Shopify no longer has this order."))
         return self._shopify_process_order(node, rebuild=True)[0]
+
+    def _shopify_fetch_order(self, shopify_order_id):
+        try:
+            return self._call("import_orders", ORDER_QUERY, {"id": shopify_order_id})["order"]
+        except ShopifyError as error:
+            raise UserError(_("Shopify could not be read: %s", error)) from error
 
     def _shopify_process_order_safely(self, node):
         try:
@@ -235,6 +239,7 @@ class ShopifyStore(models.Model):
             else:
                 if rebuild:
                     order.order_line.unlink()
+                    order.carrier_id = False
                     order.partner_invoice_id = self._shopify_order_address(
                         order.partner_id, self._shopify_address_values(node.get("billingAddress")), "invoice")
                     self._shopify_build_lines(order, node)
@@ -246,6 +251,7 @@ class ShopifyStore(models.Model):
                 "Cancelled in Shopify after the order was confirmed in Odoo. Cancel the delivery and order here."))
         elif order.state == "sale":
             self._shopify_sync_delivery_address(order, node)
+            self._shopify_invoice_and_pay(order, node)
         return order, False
 
     def _shopify_status_values(self, node):
@@ -340,9 +346,8 @@ class ShopifyStore(models.Model):
                          "price_unit": -amount, "tax_ids": [(6, 0, taxes.ids)],
                          "name": _("Shopify discount") + (f" ({', '.join(taxes.mapped('name'))})" if len(by_taxes) > 1 else "")})
 
-        shipping_product = self.order_shipping_product_id or self.env.ref(
-            "js_shopify_connector.product_shopify_shipping", raise_if_not_found=False)
         for shipping in node.get("shippingLines", {}).get("nodes") or []:
+            shipping_product = self._shopify_shipping_product(shipping.get("title"), order)
             if not shipping_product:
                 issues.append(_("Set a Shipping Product on the Shopify store."))
                 break
@@ -376,6 +381,8 @@ class ShopifyStore(models.Model):
         except UserError as error:
             order.shopify_import_issue = _("Could not be confirmed: %s", error)
             self._shopify_flag(order, order.shopify_import_issue)
+            return
+        self._shopify_invoice_and_pay(order, node)
 
     def _shopify_add_issue(self, order, issue):
         """Add a problem found after the order was imported, once, and tell a person."""

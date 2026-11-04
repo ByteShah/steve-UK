@@ -103,11 +103,36 @@
                                     <field name="order_shipping_product_id" options="{'no_create': True}"/>
                                     <field name="order_discount_product_id" options="{'no_create': True}"/>
                                 </group>
+                                <group string="Invoices and Payments">
+                                    <field name="create_invoices" widget="boolean_toggle"/>
+                                    <field name="invoices_from" invisible="not create_invoices"/>
+                                    <field name="payment_journal_id" options="{'no_create': True}"
+                                           placeholder="Shopify Payments (created on first payment)"/>
+                                    <div colspan="2" invisible="not create_invoices">
+                                        <button name="action_invoice_paid_orders" type="object"
+                                                string="Invoice Paid Orders" class="btn-secondary" icon="fa-file-text-o"
+                                                help="Invoice paid orders that were confirmed before Invoice Orders From."/>
+                                    </div>
+                                </group>
                             </group>
+                            <separator string="Shipping Methods"/>
+                            <div class="text-muted small mb-2">
+                                Shopify shipping rates are added here the first time an order uses them.
+                                Choose the Odoo delivery method for each; unmapped rates use the Shipping Product.
+                            </div>
+                            <field name="shipping_map_ids" nolabel="1">
+                                <list editable="bottom">
+                                    <field name="name"/>
+                                    <field name="carrier_id" options="{'no_create': True}"/>
+                                    <field name="order_count"/>
+                                </list>
+                            </field>
                             <div class="text-muted small">
                                 Paid and authorised orders are confirmed; orders waiting for payment stay as
                                 quotations until Shopify reports them paid. Orders with an unknown SKU or a total
                                 that does not match are kept as quotations marked Needs Attention.
+                                Once Shopify has taken the money, the order is invoiced and the payment recorded
+                                in the Payments Journal.
                             </div>
                         </page>
                         <page string="Sales Channels" name="publications">
